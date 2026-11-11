@@ -1,0 +1,33 @@
+{
+  "bucket": {
+    "hue_center": 73,
+    "hue_halfwidth": 10,
+    "s_min": 84,
+    "v_min": 74
+  },
+  "detector": {},
+  "face": {},
+  "picker": {
+    "approach_speed": 18,
+    "bucket_calibrated": true,
+    "bucket_near_w_frac": 0.7531,
+    "bucket_x_frac": 0.6234,
+    "carry_arm": -61,
+    "carry_wrist": 49,
+    "claw_closed": -91,
+    "claw_open": 29,
+    "drop_arm": -91,
+    "drop_wrist": -26,
+    "grab_arm": -91,
+    "grab_calibrated": true,
+    "grab_r_frac": 0.1673,
+    "grab_wrist": -12,
+    "grab_x_frac": 0.6167,
+    "grab_y_frac": 0.5876,
+    "look_arm": -84,
+    "look_wrist": -12
+  },
+  "ui": {
+    "voice": true
+  }
+}

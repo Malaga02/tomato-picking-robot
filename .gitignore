@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.bak
+# face samples are personal data - never commit
+Server/faces/
+# third-party ONNX models are downloaded separately (see README)
+Server/models/
+*.log

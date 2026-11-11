@@ -1,0 +1,1405 @@
+<!doctype html>
+<html lang="sr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a130e">
+<title>Berač paradajza – kontrolni centar</title>
+<!--
+  Kontrolni centar autonomnog berača čeri paradajza (master rad, Adnan Malagić).
+  Sve je u jednoj datoteci, bez spoljnih biblioteka i fontova – stranica radi i
+  kada robot nema internet. Komunikacija: WebSocket na portu 8888 (isti
+  protokol kao glavna Adeept stranica), video: /video_feed.
+-->
+<style>
+:root {
+  --bg: #0a130e; --bg-2: #0e1a14; --panel: #12221a; --panel-2: #172b21; --panel-3: #1d3428;
+  --line: rgba(220,255,230,.08); --line-2: rgba(220,255,230,.15);
+  --text: #e8f3ec; --muted: #93ab9c; --faint: #62806e;
+  --tomato: #ff5b45; --tomato-soft: rgba(255,91,69,.14);
+  --leaf: #4fd27a; --leaf-soft: rgba(79,210,122,.14);
+  --sky: #5bb6ff; --sky-soft: rgba(91,182,255,.14);
+  --amber: #ffbe55; --amber-soft: rgba(255,190,85,.14);
+  --violet: #b89bff; --violet-soft: rgba(184,155,255,.15);
+  --radius: 14px; --radius-sm: 10px;
+  --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 10px 28px rgba(0,0,0,.30);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px; line-height: 1.45; color: var(--text); min-height: 100vh;
+  background: radial-gradient(1100px 560px at 8% -12%, #1a3a2a 0%, transparent 60%),
+              radial-gradient(900px 500px at 110% 0%, #1b2f3f 0%, transparent 55%), var(--bg);
+  -webkit-tap-highlight-color: transparent;
+}
+button, input, select { font: inherit; color: inherit; }
+.wrap { max-width: 1360px; margin: 0 auto; padding: 0 16px 40px; }
+
+/* ---------- zaglavlje ---------- */
+.topbar { position: sticky; top: 0; z-index: 30; background: rgba(10,19,14,.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+.topbar-inner { max-width: 1360px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand-mark { width: 36px; height: 36px; border-radius: 11px; flex-shrink: 0; display: grid; place-items: center;
+  background: linear-gradient(145deg, #ff6a50, #d9341f); box-shadow: 0 4px 16px rgba(255,91,69,.38); }
+.brand-title { font-weight: 750; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand-sub { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; background: rgba(255,255,255,.05);
+  border: 1px solid var(--line); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.pill.btn-pill { cursor: pointer; }
+.pill.btn-pill.on { color: #cbb8ff; border-color: rgba(184,155,255,.4); background: var(--violet-soft); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex-shrink: 0; }
+.dot.ok { background: var(--leaf); box-shadow: 0 0 8px var(--leaf); }
+.dot.bad { background: var(--tomato); }
+.dot.warn { background: var(--amber); }
+.estop { border: none; cursor: pointer; border-radius: 999px; padding: 7px 14px; font-weight: 800; font-size: 12.5px; letter-spacing: .04em;
+  background: var(--tomato); color: #2a0600; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 4px 14px rgba(255,91,69,.35); }
+.estop:active { transform: scale(.97); }
+.mode-seg { display: inline-flex; padding: 3px; border-radius: 999px; background: rgba(255,255,255,.05); border: 1px solid var(--line); }
+.mode-seg button { border: none; background: none; cursor: pointer; border-radius: 999px; padding: 5px 11px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.mode-seg button.on { background: var(--leaf); color: #062312; }
+.mode-seg button.on.manual { background: var(--sky); color: #04213a; }
+
+/* ---------- tabovi ---------- */
+.tabs { max-width: 1360px; margin: 0 auto; padding: 0 16px; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { background: none; border: none; cursor: pointer; padding: 10px 13px 11px; color: var(--muted); font-weight: 650; font-size: 13.5px;
+  border-bottom: 2px solid transparent; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--leaf); }
+.tab .badge { font-size: 10.5px; padding: 1px 6px; border-radius: 999px; background: var(--amber-soft); color: var(--amber); font-weight: 800; }
+.tab .badge.crit { background: var(--tomato-soft); color: #ff9d8f; }
+.tab .badge.hide { display: none; }
+.view { display: none; padding-top: 16px; }
+.view.active { display: block; }
+
+/* ---------- raspored ---------- */
+.grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); align-items: start; }
+.stack { display: grid; gap: 16px; min-width: 0; }
+@media (max-width: 1000px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.card { background: linear-gradient(180deg, var(--panel), var(--bg-2)); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
+.card-h { display: flex; align-items: center; gap: 10px; padding: 13px 16px 0; }
+.card-t { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 750; }
+.card-h .right { margin-left: auto; }
+.card-b { padding: 12px 16px 16px; }
+.sticky-col { position: sticky; top: 112px; }
+@media (max-width: 1000px) {
+  .sticky-col { position: static; }
+  #view-calib .sticky-col, #view-people .sticky-col { order: -1; }
+}
+
+/* ---------- video ---------- */
+.video { position: relative; border-radius: var(--radius-sm); overflow: hidden; background: #000; aspect-ratio: 4 / 3; border: 1px solid var(--line); }
+.video img { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; user-select: none; -webkit-user-drag: none; }
+.video.tap { cursor: crosshair; outline: 2px solid var(--sky); outline-offset: -2px; }
+.video.tap.bucket { outline-color: var(--leaf); }
+.video-hud { position: absolute; left: 10px; top: 10px; right: 10px; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; }
+.hud { font-size: 11.5px; font-weight: 700; padding: 4px 8px; border-radius: 8px; background: rgba(0,0,0,.58); color: #fff; display: inline-flex; align-items: center; gap: 6px; backdrop-filter: blur(4px); }
+.hud .dot { width: 7px; height: 7px; }
+.hud.name { background: rgba(28,120,60,.85); }
+.hud.state { margin-left: auto; background: rgba(0,0,0,.62); }
+.video-msg { position: absolute; left: 10px; right: 10px; bottom: 10px; text-align: center; font-size: 12.5px; font-weight: 650; padding: 8px 10px;
+  border-radius: 8px; background: rgba(0,0,0,.6); color: #fff; pointer-events: none; opacity: 0; transition: opacity .2s; }
+.video.tap .video-msg { opacity: 1; }
+.greet-banner { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%) scale(.9); padding: 12px 20px; border-radius: 14px;
+  background: rgba(20,90,45,.88); color: #fff; font-size: 20px; font-weight: 800; pointer-events: none; opacity: 0; transition: all .35s; white-space: nowrap; }
+.greet-banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.tap-marker { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 3px rgba(0,0,0,.45); pointer-events: none; opacity: 0; transition: opacity .25s; }
+.tap-marker.show { opacity: 1; }
+.video-offline { position: absolute; inset: 0; display: none; place-items: center; color: var(--muted); font-size: 13px; background: #050807; }
+.video.offline .video-offline { display: grid; }
+
+.seg { display: inline-flex; padding: 3px; border-radius: 10px; background: rgba(255,255,255,.05); border: 1px solid var(--line); gap: 2px; flex-wrap: wrap; }
+.seg button { border: none; background: none; cursor: pointer; padding: 6px 11px; border-radius: 8px; font-size: 12.5px; font-weight: 650; color: var(--muted); }
+.seg button.on { background: var(--panel-3); color: var(--text); box-shadow: 0 1px 0 rgba(255,255,255,.06) inset, 0 2px 6px rgba(0,0,0,.3); }
+.toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.toolbar .lbl { font-size: 12px; color: var(--muted); }
+
+/* ---------- dugmad ---------- */
+.btn { border: 1px solid var(--line-2); background: rgba(255,255,255,.05); cursor: pointer; border-radius: 10px; padding: 9px 13px; font-size: 13px; font-weight: 650;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: background .15s, border-color .15s, transform .06s, opacity .15s; text-align: center; }
+.btn:hover { background: rgba(255,255,255,.09); }
+.btn:active { transform: scale(.98); }
+.btn:disabled { opacity: .38; cursor: not-allowed; transform: none; }
+.btn.primary { background: var(--leaf); color: #062312; border-color: transparent; }
+.btn.primary:hover { background: #63de8c; }
+.btn.danger { background: var(--tomato); color: #2a0600; border-color: transparent; }
+.btn.blue { background: var(--sky-soft); color: #9ad3ff; border-color: rgba(91,182,255,.35); }
+.btn.blue.solid { background: var(--sky); color: #04213a; border-color: transparent; }
+.btn.green { background: var(--leaf-soft); color: #8fe9ad; border-color: rgba(79,210,122,.35); }
+.btn.violet { background: var(--violet-soft); color: #d3c4ff; border-color: rgba(184,155,255,.35); }
+.btn.ghost-red { background: transparent; color: #ff9d8f; border-color: rgba(255,91,69,.35); }
+.btn.big { padding: 14px 16px; font-size: 15px; font-weight: 800; border-radius: 12px; }
+.btn.sm { padding: 5px 9px; font-size: 12px; border-radius: 8px; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-row > .btn { flex: 1 1 auto; }
+
+/* ---------- stanje i tok ---------- */
+.state-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.state-badge { font-weight: 800; font-size: 15px; padding: 7px 13px; border-radius: 10px; background: rgba(255,255,255,.06); color: var(--muted); }
+.state-badge.run { background: var(--sky-soft); color: #9ad3ff; }
+.state-badge.grab { background: var(--tomato-soft); color: #ffa293; }
+.state-badge.bucket { background: var(--leaf-soft); color: #8fe9ad; }
+.state-sub { font-size: 12px; color: var(--muted); }
+.flow { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; margin-top: 14px; }
+.flow .st { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.flow .bar { height: 5px; width: 100%; border-radius: 4px; background: rgba(255,255,255,.07); transition: background .25s; }
+.flow .nm { font-size: 10px; color: var(--faint); text-transform: uppercase; letter-spacing: .03em; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.flow .st.done .bar { background: rgba(79,210,122,.45); }
+.flow .st.cur .bar { background: var(--sky); box-shadow: 0 0 10px rgba(91,182,255,.6); }
+.flow .st.cur .nm { color: var(--text); font-weight: 750; }
+.info-line { margin-top: 12px; font-size: 13px; min-height: 19px; }
+.err-line { margin-top: 6px; font-size: 12.5px; color: #ffad9f; min-height: 18px; }
+.actions { display: grid; gap: 10px; margin-top: 14px; }
+.actions .row3 { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 10px; }
+.actions .row4 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.mode-note { font-size: 12px; color: var(--muted); }
+
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tile { background: rgba(255,255,255,.035); border: 1px solid var(--line); border-radius: 10px; padding: 10px 10px 9px; min-width: 0; }
+.tile .v { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.tile .l { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile.accent .v { color: var(--tomato); }
+.tile.accent2 .v { color: var(--leaf); }
+@keyframes pop { 0% { transform: scale(1); } 35% { transform: scale(1.22); } 100% { transform: scale(1); } }
+.pop { animation: pop .4s ease; display: inline-block; }
+
+.sensors { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.sensor { border-radius: 10px; padding: 10px; border: 1px solid var(--line); background: rgba(255,255,255,.03); min-width: 0; }
+.sensor .h { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 750; }
+.sensor .s { font-size: 11.5px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sensor.on { border-color: rgba(79,210,122,.35); background: var(--leaf-soft); }
+.sensor.mid { border-color: rgba(255,190,85,.3); background: var(--amber-soft); }
+.meter { height: 6px; border-radius: 4px; background: rgba(255,255,255,.07); overflow: hidden; margin-top: 8px; }
+.meter > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--sky), var(--leaf)); transition: width .25s; border-radius: 4px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12px; }
+
+/* ---------- grafici ---------- */
+.charts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.chart { border: 1px solid var(--line); border-radius: 10px; padding: 8px 9px 6px; background: rgba(255,255,255,.025); min-width: 0; }
+.chart .h { display: flex; justify-content: space-between; gap: 6px; font-size: 11px; color: var(--muted); }
+.chart .h span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chart .h b { color: var(--text); font-family: var(--mono); font-weight: 600; white-space: nowrap; }
+.chart canvas { width: 100%; height: 40px; display: block; margin-top: 4px; }
+@media (max-width: 640px) { .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------- prekidaci ---------- */
+.switch { position: relative; width: 46px; height: 26px; flex-shrink: 0; cursor: pointer; display: inline-block; }
+.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.switch span { position: absolute; inset: 0; border-radius: 999px; background: rgba(255,255,255,.12); transition: background .2s; }
+.switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .2s; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+.switch input:checked + span { background: var(--leaf); }
+.switch input:checked + span::after { transform: translateX(20px); }
+.switch input:disabled + span { opacity: .4; cursor: not-allowed; }
+.toggles { display: grid; gap: 8px; }
+.toggle-row { display: flex; align-items: center; gap: 14px; padding: 11px 13px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.03); cursor: pointer; }
+.toggle-row .tx { flex: 1; min-width: 0; }
+.toggle-row .tx b { display: block; font-size: 13.5px; }
+.toggle-row .tx span { font-size: 12px; color: var(--muted); }
+.toggle-row .tx span.warn { color: var(--amber); }
+
+/* ---------- rucna kontrola ---------- */
+.jog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.jog-grp { border: 1px solid var(--line); border-radius: 10px; padding: 9px; background: rgba(255,255,255,.025); }
+.jog-grp .t { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 7px; display: flex; justify-content: space-between; }
+.jog-grp .t b { font-family: var(--mono); color: var(--text); font-weight: 600; letter-spacing: 0; }
+.jog-grp .btn-row .btn { padding: 11px 8px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.jog-grp .btn.held { background: var(--sky); color: #04213a; border-color: transparent; }
+.jog-grp.wide { grid-column: 1 / -1; }
+
+/* ---------- kalibracija ---------- */
+.steps { display: grid; gap: 12px; }
+.step { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.025); }
+.step .num { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; background: rgba(255,255,255,.07); color: var(--muted); }
+.step.ok .num { background: var(--leaf); color: #062312; }
+.step.todo .num { background: var(--amber); color: #2b1a00; }
+.step h3 { margin: 3px 0 4px; font-size: 14.5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.step p { margin: 0 0 10px; color: var(--muted); font-size: 12.8px; }
+.step .meta { font-size: 11.5px; color: var(--faint); margin-top: 8px; font-family: var(--mono); }
+.tag { font-size: 10.5px; font-weight: 800; letter-spacing: .04em; padding: 2px 7px; border-radius: 999px; text-transform: uppercase; }
+.tag.ok { background: var(--leaf-soft); color: var(--leaf); }
+.tag.todo { background: var(--amber-soft); color: var(--amber); }
+.tag.info { background: rgba(255,255,255,.07); color: var(--muted); }
+
+/* ---------- osobe ---------- */
+.enroll-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.input { flex: 1 1 180px; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: rgba(0,0,0,.25); color: var(--text); outline: none; }
+.input:focus { border-color: var(--leaf); box-shadow: 0 0 0 3px rgba(79,210,122,.18); }
+.progress { height: 8px; border-radius: 6px; background: rgba(255,255,255,.07); overflow: hidden; }
+.progress > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--violet), var(--sky)); transition: width .3s; }
+.cover { display: flex; gap: 6px; margin-top: 8px; }
+.cover span { flex: 1; text-align: center; font-size: 11px; padding: 4px; border-radius: 8px; background: rgba(255,255,255,.05); color: var(--muted); }
+.cover span.ok { background: var(--leaf-soft); color: var(--leaf); }
+.people { display: grid; gap: 8px; }
+.person { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.03); }
+.person.seen { border-color: rgba(79,210,122,.5); background: var(--leaf-soft); }
+.avatar { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: #062312; background: linear-gradient(145deg, #7ee6a0, #3cb468); }
+.person .nm { font-weight: 750; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.person .sub { font-size: 11.5px; color: var(--muted); }
+.person .acts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.person .wv { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--muted); cursor: pointer; }
+.person .wv .switch { transform: scale(.8); }
+@media (max-width: 560px) { .person { grid-template-columns: 38px minmax(0, 1fr); } .person .acts { grid-column: 1 / -1; justify-content: flex-start; } }
+.seen-now { display: flex; gap: 8px; flex-wrap: wrap; min-height: 30px; align-items: center; }
+.seen-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: var(--leaf-soft); color: #8fe9ad; font-weight: 750; font-size: 13px; }
+
+/* ---------- asistent ---------- */
+.insights { display: grid; gap: 8px; }
+.insight { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.03); }
+.insight .ic { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-weight: 900; font-size: 13px; }
+.insight.crit { border-color: rgba(255,91,69,.4); } .insight.crit .ic { background: var(--tomato-soft); color: #ff9d8f; }
+.insight.warn { border-color: rgba(255,190,85,.35); } .insight.warn .ic { background: var(--amber-soft); color: var(--amber); }
+.insight.info .ic { background: var(--sky-soft); color: #9ad3ff; }
+.insight.ok .ic { background: var(--leaf-soft); color: var(--leaf); }
+.insight .tt { font-weight: 750; font-size: 13.5px; }
+.insight .tx { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+@media (max-width: 560px) { .insight { grid-template-columns: 26px minmax(0, 1fr); } .insight > :last-child { grid-column: 2; } }
+.ai-off { padding: 14px; border-radius: 12px; border: 1px dashed var(--line-2); color: var(--muted); font-size: 13px; text-align: center; }
+.chat { height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }
+.msg { max-width: 86%; padding: 8px 11px; border-radius: 12px; font-size: 13px; white-space: pre-wrap; }
+.msg.me { align-self: flex-end; background: var(--sky-soft); color: #cfe9ff; border-bottom-right-radius: 4px; }
+.msg.bot { align-self: flex-start; background: rgba(255,255,255,.06); border-bottom-left-radius: 4px; }
+.cmdbar { display: flex; gap: 8px; margin-top: 10px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.chip { cursor: pointer; font-size: 12px; padding: 5px 10px; border-radius: 999px; background: rgba(255,255,255,.05); border: 1px solid var(--line); color: var(--muted); }
+.chip:hover { color: var(--text); border-color: var(--line-2); }
+
+/* ---------- podesavanja ---------- */
+.set-groups { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
+.set-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.set-row:last-child { border-bottom: none; }
+.set-row .nm { font-size: 13px; }
+.set-row .nm small { display: block; color: var(--faint); font-size: 11px; }
+.set-row .val { font-family: var(--mono); font-size: 12.5px; min-width: 64px; text-align: right; }
+.set-row .val.changed { color: var(--amber); }
+.set-row input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--leaf); height: 22px; }
+.save-bar { position: sticky; bottom: 12px; margin-top: 16px; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
+  background: rgba(18,34,26,.96); border: 1px solid var(--line-2); box-shadow: var(--shadow); backdrop-filter: blur(8px); flex-wrap: wrap; }
+.save-bar .msg2 { flex: 1; font-size: 12.5px; color: var(--muted); min-width: 160px; }
+
+/* ---------- dnevnik ---------- */
+.log { max-height: 600px; overflow-y: auto; font-size: 12.8px; }
+.log-row { display: grid; grid-template-columns: 72px 18px minmax(0, 1fr); gap: 8px; padding: 7px 4px; border-bottom: 1px solid var(--line); align-items: start; }
+.log-row .tm { color: var(--faint); font-family: var(--mono); font-size: 11.5px; padding-top: 1px; }
+.log-row .ic { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--sky); }
+.log-row.warn .ic { background: var(--amber); } .log-row.ok .ic { background: var(--leaf); }
+.log-row.greet .ic { background: var(--violet); } .log-row.local .ic { background: var(--faint); }
+.empty { color: var(--faint); font-size: 12.5px; padding: 14px 4px; }
+
+.hint { font-size: 12.5px; color: var(--muted); } .hint b { color: var(--text); }
+.small { font-size: 12px; color: var(--muted); }
+.mt8 { margin-top: 8px; } .mt12 { margin-top: 12px; } .mt16 { margin-top: 16px; }
+.warn-box { border: 1px solid rgba(255,190,85,.3); background: var(--amber-soft); color: #ffd99a; padding: 10px 12px; border-radius: 10px; font-size: 12.5px; }
+.hide { display: none !important; }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 16px); opacity: 0; pointer-events: none; z-index: 60; max-width: min(560px, 92vw);
+  padding: 11px 16px; border-radius: 12px; font-size: 13px; text-align: center; background: #1d3628; border: 1px solid var(--line-2); box-shadow: 0 10px 30px rgba(0,0,0,.45); transition: opacity .2s, transform .2s; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.err { border-color: rgba(255,91,69,.5); }
+.footer { margin-top: 26px; font-size: 12px; color: var(--faint); display: flex; gap: 12px; flex-wrap: wrap; justify-content: space-between; }
+.footer a { color: var(--muted); text-decoration: none; }
+kbd { font-family: var(--mono); font-size: 11px; padding: 1px 5px; border-radius: 5px; border: 1px solid var(--line-2); background: rgba(255,255,255,.05); }
+@media (max-width: 860px) {
+  .brand-sub, .pill.cpu, #voicePill .lbl, #aiPill .lbl { display: none; }
+}
+@media (max-width: 720px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sensors { grid-template-columns: minmax(0, 1fr); }
+  .flow { grid-template-columns: repeat(5, minmax(0, 1fr)); row-gap: 10px; }
+  .jog { grid-template-columns: minmax(0, 1fr); }
+  .set-groups { grid-template-columns: minmax(0, 1fr); }
+  .actions .row3, .actions .row4 { grid-template-columns: 1fr 1fr; }
+  .actions .row3 > :first-child, .actions .row4 > :first-child { grid-column: 1 / -1; }
+  .brand > div:last-child { display: none; }
+}
+@media (max-width: 480px) {
+  .wrap, .topbar-inner, .tabs { padding-left: 10px; padding-right: 10px; }
+  .topbar-inner { gap: 6px; }
+  #connText { display: none; }
+  .mode-seg button { padding: 5px 8px; }
+  .estop { padding: 7px 10px; }
+  .brand-mark { width: 32px; height: 32px; }
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="13.5" r="7.5" fill="#fff" fill-opacity=".92"/><path d="M12 6c-1.2-1.6-3-2.2-4.6-1.8M12 6c1.2-1.6 3-2.2 4.6-1.8M12 6V3.2" stroke="#2f8a4c" stroke-width="2" stroke-linecap="round"/></svg>
+      </div>
+      <div style="min-width:0">
+        <div class="brand-title">Berač čeri paradajza</div>
+        <div class="brand-sub">Adeept PiCar-Pro · kontrolni centar</div>
+      </div>
+    </div>
+    <div class="top-right">
+      <div class="mode-seg" id="modeSeg" title="Automatski: robot sam bere. Ručno: ti upravljaš, robot izvršava korake.">
+        <button data-mode="auto" class="on">AUTO</button><button data-mode="manual">RUČNO</button>
+      </div>
+      <span class="pill btn-pill" id="aiPill" title="AI asistent (preporuke) uključen/isključen"><span class="dot" id="aiDot"></span><span class="lbl">AI asistent</span></span>
+      <span class="pill btn-pill" id="voicePill" title="Glasovne poruke"><span id="voiceIco">🔇</span><span class="lbl">Glas</span></span>
+      <span class="pill cpu" id="cpuPill" title="Temperatura i opterećenje procesora robota">CPU –</span>
+      <span class="pill" title="Veza sa robotom"><span class="dot bad" id="connDot"></span><span id="connText">Povezivanje…</span></span>
+      <button class="estop" id="estopBtn" title="Zaustavi sve (Space ili Esc)">
+        <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="2" fill="currentColor"/></svg>STOP
+      </button>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-view="live">Kontrola</button>
+    <button class="tab" data-view="calib">Kalibracija <span class="badge hide" id="calibBadge">!</span></button>
+    <button class="tab" data-view="people">Osobe</button>
+    <button class="tab" data-view="ai">AI asistent <span class="badge hide" id="aiBadge">0</span></button>
+    <button class="tab" data-view="settings">Podešavanja</button>
+    <button class="tab" data-view="log">Dnevnik</button>
+  </nav>
+</header>
+
+<main class="wrap">
+
+  <!-- ===================== KONTROLA ===================== -->
+  <section class="view active" id="view-live">
+    <div class="grid">
+      <div class="stack">
+        <div class="card">
+          <div class="card-b" id="videoHome"><div id="videoBlock">
+            <div class="video" id="video">
+              <img id="videoImg" alt="Kamera robota">
+              <div class="video-hud">
+                <span class="hud"><span class="dot" id="hudTomato"></span>Paradajz</span>
+                <span class="hud"><span class="dot" id="hudBucket"></span>Kantica</span>
+                <span id="hudNames"></span>
+                <span class="hud state" id="hudFps">– fps</span>
+              </div>
+              <div class="greet-banner" id="greetBanner"></div>
+              <div class="tap-marker" id="tapMarker"></div>
+              <div class="video-msg" id="videoMsg"></div>
+              <div class="video-offline">Video nije dostupan – proveri vezu sa robotom.</div>
+            </div>
+            <div class="toolbar">
+              <span class="lbl">Dodir na slici:</span>
+              <div class="seg" id="tapSeg">
+                <button data-tap="off" class="on">Isključeno</button>
+                <button data-tap="tomato">Boja paradajza</button>
+                <button data-tap="bucket">Boja kantice</button>
+              </div>
+              <div class="seg" style="margin-left:auto"><button id="maskBtn" title="Prikaži piksele koji prolaze filter boje paradajza">Maska boje</button></div>
+            </div>
+          </div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><span class="card-t">Telemetrija uživo</span><span class="right small">poslednjih 60 s</span></div>
+          <div class="card-b">
+            <div class="charts">
+              <div class="chart"><div class="h"><span>Sigurnost paradajza</span><b id="chConfV">–</b></div><canvas id="chConf"></canvas></div>
+              <div class="chart"><div class="h"><span>Kantica (širina)</span><b id="chBucketV">–</b></div><canvas id="chBucket"></canvas></div>
+              <div class="chart"><div class="h"><span>Obrada slike</span><b id="chFpsV">–</b></div><canvas id="chFps"></canvas></div>
+              <div class="chart"><div class="h"><span>CPU temperatura</span><b id="chTempV">–</b></div><canvas id="chTemp"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card hide" id="manualJogCard">
+          <div class="card-h"><span class="card-t">Ručna kontrola</span><span class="right small">drži dugme pritisnuto</span></div>
+          <div class="card-b"><div class="jog-slot" data-jog></div></div>
+        </div>
+      </div>
+
+      <div class="stack sticky-col">
+        <div class="card">
+          <div class="card-h"><span class="card-t">Stanje robota</span><span class="right small" id="stateFor"></span></div>
+          <div class="card-b">
+            <div class="state-line">
+              <div class="state-badge" id="stateBadge">MIRUJE</div>
+              <div class="state-sub" id="stateSub">Spreman</div>
+            </div>
+            <div class="flow" id="flow"></div>
+            <div class="info-line" id="infoLine"></div>
+            <div class="err-line" id="errLine"></div>
+            <div class="actions" id="autoActions">
+              <div class="row3">
+                <button class="btn primary big" id="startBtn"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 1.8v10.4L12 7z" fill="currentColor"/></svg>Pokreni berbu</button>
+                <button class="btn green big" data-cmd="tomatoPickOne" title="Jedan ceo ciklus, pa stani">Uberi jedan</button>
+                <button class="btn danger big" data-stop>Zaustavi</button>
+              </div>
+            </div>
+            <div class="actions hide" id="manualActions">
+              <div class="mode-note">Ručni režim: dovezi robota i namesti ruku (ručna kontrola levo), pa izvrši korak:</div>
+              <div class="row4">
+                <button class="btn blue solid big" data-cmd="tomatoManualGrab" title="Zatvori hvataljku ovde, podigni i proveri">✊ Uhvati</button>
+                <button class="btn green big" data-cmd="tomatoManualDeliver" title="Nađi kanticu, priđi i ubaci">🪣 U kanticu</button>
+                <button class="btn big" data-cmd="tomatoManualPlace" title="Odloži na snimljenu pozu odlaganja">📥 Odloži</button>
+              </div>
+              <button class="btn danger" data-stop>Zaustavi</button>
+            </div>
+            <div class="warn-box mt12 hide" id="calibWarn"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><span class="card-t">Opcije</span></div>
+          <div class="card-b toggles" id="optToggles">
+            <label class="toggle-row" for="bucketToggle">
+              <div class="tx"><b>Ubacuj u kanticu</b><span id="bucketSub">Robot nađe zelenu kanticu i ubaci paradajz.</span></div>
+              <span class="switch"><input type="checkbox" id="bucketToggle"><span></span></span>
+            </label>
+            <label class="toggle-row" for="recogToggle">
+              <div class="tx"><b>Prepoznavanje osoba</b><span>Ime prepoznate osobe na videu i stranici.</span></div>
+              <span class="switch"><input type="checkbox" id="recogToggle"><span></span></span>
+            </label>
+            <label class="toggle-row" for="waveToggle">
+              <div class="tx"><b>Mahni kad prepoznaš</b><span>Robot se okrene ka osobi i mahne rukom levo-desno.</span></div>
+              <span class="switch"><input type="checkbox" id="waveToggle"><span></span></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="card" id="aiMiniCard">
+          <div class="card-h"><span class="card-t">AI asistent</span><button class="btn sm right" data-goto="ai">Sve preporuke →</button></div>
+          <div class="card-b">
+            <div class="insights" id="aiMini"></div>
+            <div class="cmdbar">
+              <input class="input" id="cmdMini" placeholder="Komanda: „uberi jedan“, „ko je ispred?“…" autocomplete="off">
+              <button class="btn violet" id="cmdMiniBtn">Pošalji</button>
+            </div>
+            <div class="small mt8" id="cmdMiniReply"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><span class="card-t">Statistika sesije</span><button class="btn sm right" data-cmd="tomatoResetStats">Obriši</button></div>
+          <div class="card-b">
+            <div class="tiles">
+              <div class="tile accent"><div class="v" id="stPicked">0</div><div class="l">Ubrano</div></div>
+              <div class="tile accent2"><div class="v" id="stBucket">0</div><div class="l">U kantici</div></div>
+              <div class="tile"><div class="v" id="stRate">–</div><div class="l">Uspešnost hvatanja</div></div>
+              <div class="tile"><div class="v" id="stAttempts">0</div><div class="l">Prilazaka</div></div>
+              <div class="tile"><div class="v" id="stRun">00:00</div><div class="l">Vreme rada</div></div>
+              <div class="tile"><div class="v" id="stCycle">–</div><div class="l">Prosečan ciklus</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><span class="card-t">Percepcija</span></div>
+          <div class="card-b">
+            <div class="sensors">
+              <div class="sensor" id="snTomato"><div class="h"><span class="dot" id="snTomatoDot"></span>Paradajz</div><div class="s" id="snTomatoS">nije vidljiv</div><div class="meter"><i id="snTomatoM"></i></div></div>
+              <div class="sensor" id="snBucket"><div class="h"><span class="dot" id="snBucketDot"></span>Kantica</div><div class="s" id="snBucketS">nije vidljiva</div><div class="meter"><i id="snBucketM"></i></div></div>
+              <div class="sensor" id="snFace"><div class="h"><span class="dot" id="snFaceDot"></span>Osobe</div><div class="s" id="snFaceS">isključeno</div><div class="meter"><i id="snFaceM"></i></div></div>
+            </div>
+            <dl class="kv mt12">
+              <dt>Kamera / model</dt><dd id="kvCam">–</dd>
+              <dt>Okret ruke / točkovi</dt><dd id="kvPan">–</dd>
+              <dt>Osvetljenost slike</dt><dd id="kvLight">–</dd>
+              <dt>Boja paradajza / kantice</dt><dd id="kvColor">–</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== KALIBRACIJA ===================== -->
+  <section class="view" id="view-calib">
+    <div class="grid">
+      <div class="stack">
+        <div class="card">
+          <div class="card-h"><span class="card-t">Koraci kalibracije</span><span class="right small">jednom, posle sastavljanja robota</span></div>
+          <div class="card-b"><div class="steps">
+            <div class="step ok" id="stepLook"><div class="num">1</div><div>
+              <h3>Poza gledanja <span class="tag ok">podešeno</span></h3>
+              <p>Ručnom kontrolom namesti ruku i zglob tako da kamera vidi pod ispred robota (20–80 cm). U ovoj pozi robot traži paradajz.</p>
+              <div class="btn-row"><button class="btn" data-cmd="tomatoSaveLookPose">Zapamti pozu gledanja</button><button class="btn sm" data-cmd="tomatoGoLook">Proveri</button></div>
+              <div class="meta" id="metaLook"></div></div></div>
+            <div class="step ok" id="stepClaw"><div class="num">2</div><div>
+              <h3>Hvataljka <span class="tag ok">podešeno</span></h3>
+              <p>Zatvori hvataljku dok se prsti ne dodirnu (bez krckanja servoa) i zapamti; isto za potpuno otvorenu. „Test“ proverava obe vrednosti.</p>
+              <div class="btn-row"><button class="btn" data-cmd="tomatoSaveClawOpen">Zapamti OTVORENU</button><button class="btn" data-cmd="tomatoSaveClawClosed">Zapamti ZATVORENU</button><button class="btn blue" data-cmd="tomatoClawTest">Test hvataljke</button></div>
+              <div class="meta" id="metaClaw"></div></div></div>
+            <div class="step" id="stepGrab"><div class="num">3</div><div>
+              <h3>Hvatanje <span class="tag" id="tagGrab">–</span></h3>
+              <p>Otvori hvataljku, spusti ruku tako da su prsti tik iznad poda, stavi paradajz <b>tačno između prstiju</b> (zeleni/žuti krug na videu) i pritisni dugme. Robot pamti pozu ruke i gde se paradajz vidi u kadru.</p>
+              <div class="btn-row"><button class="btn green" data-cmd="tomatoSaveGrabTarget">Kalibriši hvatanje</button><button class="btn sm" data-cmd="tomatoGoGrab">Proveri</button></div>
+              <div class="meta" id="metaGrab"></div></div></div>
+            <div class="step" id="stepPlace"><div class="num">4</div><div>
+              <h3>Poza odlaganja <span class="tag" id="tagPlace">–</span></h3>
+              <p>Okreni ruku, spusti je i namesti zglob tačno tamo gde robot treba da <b>ostavi paradajz</b> (npr. korpa na robotu ili pod pored njega), pa zapamti. Koristi se kad je kantica isključena ili nije nađena.</p>
+              <div class="btn-row"><button class="btn green" data-cmd="tomatoSavePlacePose">Zapamti pozu odlaganja</button><button class="btn sm" data-cmd="tomatoGoPlace">Proveri</button></div>
+              <div class="meta" id="metaPlace"></div></div></div>
+            <div class="step" id="stepBucket"><div class="num">5</div><div>
+              <h3>Kantica – rastojanje <span class="tag" id="tagBucket">–</span></h3>
+              <p>Stavi kanticu ispred robota na rastojanje sa kog hvataljka dosegne iznad otvora. Namesti ruku tako da kamera vidi kanticu (zeleni okvir „KANTICA“) i pritisni dugme. Ako okvir ne obuhvata kanticu, prvo podesi boju dodirom.</p>
+              <div class="btn-row"><button class="btn green" data-cmd="tomatoSaveBucket">Kalibriši kanticu</button><button class="btn blue" data-tapmode="bucket">Dodirni kanticu</button><button class="btn" data-cmd="tomatoBucketColorReset">Podrazumevana zelena</button></div>
+              <div class="meta" id="metaBucket"></div></div></div>
+            <div class="step" id="stepDrop"><div class="num">6</div><div>
+              <h3>Poza ubacivanja <span class="tag" id="tagDrop">–</span></h3>
+              <p>Robot na istom mestu: podigni ruku i namesti zglob tako da je hvataljka <b>iznad otvora kantice</b>, pa zapamti.</p>
+              <div class="btn-row"><button class="btn green" data-cmd="tomatoSaveDropPose">Zapamti pozu ubacivanja</button><button class="btn sm" data-cmd="tomatoGoDrop">Proveri</button></div>
+              <div class="meta" id="metaDrop"></div></div></div>
+            <div class="step" id="stepMask"><div class="num">7</div><div>
+              <h3>Maska hvataljke <span class="tag" id="tagMask">–</span></h3>
+              <p>Prsti hvataljke se vide u donjem delu kadra i zaklanjaju kanticu dok joj robot prilazi. Postavi robota iznad šarene podloge (tepih) i pritisni dugme – robot ~8 s okreće ruku levo-desno i sam nađe gde su prsti.</p>
+              <div class="btn-row"><button class="btn violet" data-cmd="tomatoCalibClawMask">Kalibriši masku hvataljke</button><button class="btn sm" data-cmd="tomatoResetClawMask">Obriši</button></div>
+              <div class="meta" id="metaMask"></div></div></div>
+            <div class="step ok" id="stepColor"><div class="num">8</div><div>
+              <h3>Boja paradajza <span class="tag info">po potrebi</span></h3>
+              <p>Podrazumevano je crvena. Pri neobičnom svetlu izaberi „Boja paradajza“ ispod videa i dodirni sam paradajz.</p>
+              <div class="btn-row"><button class="btn blue" data-tapmode="tomato">Dodirni paradajz</button><button class="btn" data-cmd="tomatoColorReset">Podrazumevana boja</button></div></div></div>
+          </div></div>
+        </div>
+      </div>
+      <div class="stack sticky-col">
+        <div class="card"><div class="card-b" id="calibVideoSlot"></div></div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">Ručna kontrola</span><span class="right small">drži dugme pritisnuto</span></div>
+          <div class="card-b"><div class="jog-slot" data-jog></div><div class="small mt8 jog-note hide">Ručna kontrola je isključena dok robot radi.</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== OSOBE ===================== -->
+  <section class="view" id="view-people">
+    <div class="grid">
+      <div class="stack">
+        <div class="card">
+          <div class="card-h"><span class="card-t">Prepoznate sada</span><span class="right small" id="pplModel"></span></div>
+          <div class="card-b">
+            <div class="warn-box hide" id="faceUnavail"></div>
+            <div class="seen-now" id="seenNow"><span class="small">Uključi prepoznavanje osoba.</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">Nauči novo lice</span></div>
+          <div class="card-b">
+            <div class="enroll-form">
+              <input class="input" id="enrollName" maxlength="32" placeholder="Ime osobe (npr. Adnan)" autocomplete="off">
+              <button class="btn green" id="enrollBtn">Nauči lice</button>
+              <button class="btn hide" id="enrollCancelBtn">Otkaži</button>
+            </div>
+            <p class="hint mt8" style="margin-bottom:0">Osoba stane 0,5–1 m ispred kamere, pri dobrom svetlu; za ~15 s robot snimi 15 uzoraka – za to vreme polako okreći glavu levo-desno i gore-dole. Samo ta osoba treba da bude u kadru. Uzorci ostaju samo na robotu.</p>
+            <div class="progress mt12"><i id="enrollBar"></i></div>
+            <div class="cover" id="enrollCover"><span data-k="levo">◀ levo</span><span data-k="pravo">● pravo</span><span data-k="desno">desno ▶</span></div>
+            <div class="small mt8" id="enrollMsg">&nbsp;</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">Naučene osobe</span><span class="right small" id="pplCount"></span></div>
+          <div class="card-b">
+            <div class="people" id="peopleList"><div class="empty">Još nijedna osoba nije naučena.</div></div>
+            <div class="btn-row mt12">
+              <button class="btn blue" data-cmd="tomatoWaveTest">Mahni sada (test)</button>
+              <button class="btn" data-cmd="tomatoSaveWatchPose" title="Poza u kojoj kamera gleda lica">Zapamti pozu za lica</button>
+              <button class="btn ghost-red" id="forgetAllBtn">Obriši sve osobe</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="stack sticky-col">
+        <div class="card"><div class="card-b" id="peopleVideoSlot"></div></div>
+        <div class="card"><div class="card-b toggles" id="peopleToggleSlot"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== AI ASISTENT ===================== -->
+  <section class="view" id="view-ai">
+    <div class="grid">
+      <div class="stack">
+        <div class="card">
+          <div class="card-h"><span class="card-t">Dijagnostika i preporuke</span>
+            <label class="right switch" title="AI asistent uključen/isključen"><input type="checkbox" id="aiToggle"><span></span></label></div>
+          <div class="card-b">
+            <div class="insights" id="aiList"></div>
+            <div class="ai-off hide" id="aiOff">AI asistent je isključen – robot radi isto, samo bez preporuka (ručni rad). Uključi ga prekidačem gore desno.</div>
+            <p class="small mt12" style="margin-bottom:0">Asistent je ekspertski sistem koji radi lokalno na robotu (bez interneta): stalno prati kameru, osvetljenje, detekciju, uspešnost hvatanja, prilazak kantici i kalibracije, zaključuje šta ne valja i predlaže konkretnu ispravku – dugme na preporuci je odmah sprovodi.</p>
+          </div>
+        </div>
+      </div>
+      <div class="stack sticky-col">
+        <div class="card">
+          <div class="card-h"><span class="card-t">Komande</span><span class="right small">piši kao čoveku</span></div>
+          <div class="card-b">
+            <div class="chat" id="chat"></div>
+            <div class="cmdbar">
+              <input class="input" id="cmdInput" placeholder="npr. „uberi jedan“, „nauči lice Adnan“, „ko je ispred?“" autocomplete="off">
+              <button class="btn hide" id="micBtn" title="Glasovna komanda">🎤</button>
+              <button class="btn violet" id="cmdBtn">Pošalji</button>
+            </div>
+            <div class="chips" id="cmdChips"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== PODESAVANJA ===================== -->
+  <section class="view" id="view-settings">
+    <div class="card" style="margin-bottom:16px"><div class="card-b toggles">
+      <label class="toggle-row" for="logToggle">
+        <div class="tx"><b>Snimanje uzoraka za trening</b><span id="logSub">Svake 2 s snima sirovi frejm i rezultat detekcije.</span></div>
+        <span class="switch"><input type="checkbox" id="logToggle"><span></span></span>
+      </label>
+    </div></div>
+    <div class="set-groups" id="setGroups"><div class="empty">Učitavanje podešavanja…</div></div>
+    <div class="save-bar">
+      <span class="msg2" id="saveMsg">Promene važe odmah posle čuvanja.</span>
+      <button class="btn" id="setResetBtn">Podrazumevano</button>
+      <button class="btn" id="setUndoBtn" disabled>Poništi</button>
+      <button class="btn primary" id="setSaveBtn" disabled>Sačuvaj</button>
+    </div>
+  </section>
+
+  <!-- ===================== DNEVNIK ===================== -->
+  <section class="view" id="view-log">
+    <div class="card">
+      <div class="card-h"><span class="card-t">Dnevnik događaja</span>
+        <div class="right btn-row" style="flex-wrap:nowrap">
+          <div class="seg" id="logFilter"><button data-f="all" class="on">Sve</button><button data-f="warn">Upozorenja</button><button data-f="greet">Osobe</button></div>
+          <button class="btn sm" id="logExportBtn">Preuzmi</button>
+          <button class="btn sm" id="logClearBtn">Očisti</button>
+        </div>
+      </div>
+      <div class="card-b"><div class="log" id="logList"><div class="empty">Još nema događaja.</div></div></div>
+    </div>
+    <div class="footer">
+      <span>Prečice: <kbd>Space</kbd>/<kbd>Esc</kbd> zaustavi · <kbd>1</kbd>–<kbd>6</kbd> tabovi · <kbd>/</kbd> komanda</span>
+      <a href="/">← Glavna Adeept kontrola</a>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/*CMD-START*/
+// ----------------------------------------------------------------------
+// Tumač komandi na srpskom (radi i bez kvačica). Vraća:
+// {send: [komande], json: [[naslov, podaci]], jog: [drži, pusti, ms], reply: 'tekst', tab: 'ime'}
+// ----------------------------------------------------------------------
+function cmdNorm(s) {
+  return String(s || '').toLowerCase()
+    .replace(/[čć]/g, 'c').replace(/š/g, 's').replace(/ž/g, 'z').replace(/đ/g, 'dj')
+    .replace(/[^a-z0-9 ?]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function parseCommand(text, st) {
+  var raw = String(text || '').trim();
+  var t = cmdNorm(raw);
+  st = st || {};
+  var face = st.face || {};
+  var on = /\b(ukljuci|upali|aktiviraj|ukljucen)\b/.test(t);
+  var off = /\b(iskljuci|ugasi|deaktiviraj|iskljucen)\b/.test(t);
+  if (!t) return { reply: 'Napiši komandu ili „pomoć“.' };
+  if (/\b(stop|stani|stanite|zaustavi|stoj|prekini)\b/.test(t)) return { send: ['tomatoStop', 'DS', 'TS'], reply: 'Zaustavljam sve.' };
+  if (/\b(pomoc|help|komande|sta znas|sta umes)\b/.test(t)) return { reply:
+    'Mogu da razumem npr.:\n• „pokreni berbu“, „uberi jedan“, „stani“\n• „uhvati“, „ubaci u kanticu“, „odloži“\n' +
+    '• „uključi/isključi kanticu“, „ručni/automatski režim“\n• „nauči lice Adnan“, „ko je ispred?“, „mahni“\n' +
+    '• „ruka gore/dole“, „otvori/zatvori hvataljku“, „test hvataljke“\n• „koliko si ubrao?“, „status“, „šta nije u redu?“' };
+  if (/\bnauci\b/.test(t)) {
+    var m = raw.match(/nau[cč]i\s+(.*)$/i);
+    var name = (m ? m[1] : '').replace(/^(moje\s+|novo\s+)?(lice|osobu)\s*/i, '').trim();
+    if (!name || /^(moje|me|mene)$/i.test(name)) return { reply: 'Kako se osoba zove? Npr. „nauči lice Adnan“.' };
+    return { json: [['faceEnroll', { name: name }]], reply: 'Učim lice: ' + name + '. Gledaj u kameru i polako okreći glavu.', tab: 'people' };
+  }
+  if (/\bko je\b|\bko se vidi\b|\bkoga vidis\b|\bprepoznajes li\b/.test(t)) {
+    var rec = face.recognized || [];
+    if (!face.recognize && !face.enabled) return { reply: 'Prepoznavanje osoba je isključeno – reci „uključi prepoznavanje“.' };
+    if (rec.length) return { reply: 'Vidim: ' + rec.map(function (p) { return p.name + ' (' + Math.round(p.sim * 100) + '%)'; }).join(', ') + '.' };
+    return { reply: face.faces ? 'Vidim lice, ali ga ne prepoznajem.' : 'Trenutno ne vidim nikoga.' };
+  }
+  if (/prepozn/.test(t) && (on || off)) return { send: [off ? 'tomatoRecogOff' : 'tomatoRecogOn'], reply: off ? 'Isključujem prepoznavanje osoba.' : 'Uključujem prepoznavanje osoba.' };
+  if (/\b(mahni|mahanje|mahaj|pozdravi)\b/.test(t)) {
+    if (off) return { send: ['tomatoWaveOff'], reply: 'Isključujem mahanje.' };
+    if (on) return { send: ['tomatoWaveOn'], reply: 'Uključujem mahanje.' };
+    return { send: ['tomatoWaveTest'], reply: 'Mašem! 👋' };
+  }
+  if (/kantic/.test(t) && (on || off) && !/ubaci|stavi|nosi|odnesi/.test(t)) return { send: [off ? 'tomatoBucketOff' : 'tomatoBucketOn'], reply: off ? 'Kantica isključena – odlažem na pozu odlaganja.' : 'Ubacivanje u kanticu uključeno.' };
+  if (/(asistent|preporuk)/.test(t) && (on || off)) return { send: [off ? 'tomatoAssistantOff' : 'tomatoAssistantOn'], reply: off ? 'AI asistent isključen.' : 'AI asistent uključen.' };
+  if (/\b(glas|govori|pricaj)\b/.test(t) && (on || off)) return { send: [off ? 'tomatoVoiceOff' : 'tomatoVoiceOn'], reply: off ? 'Glas isključen.' : 'Glas uključen.' };
+  if (/\brucn/.test(t)) return { send: ['tomatoModeManual'], reply: 'Prelazim u ručni režim.' };
+  if (/\bautomat/.test(t)) return { send: ['tomatoModeAuto'], reply: 'Prelazim u automatski režim.' };
+  if (/(ubaci|stavi|nosi|odnesi).*kantic|u kanticu/.test(t)) return { send: ['tomatoManualDeliver'], reply: 'Nosim paradajz u kanticu.' };
+  if (/\b(odlozi|ostavi|odlaganje)\b|spusti paradajz/.test(t)) return { send: ['tomatoManualPlace'], reply: 'Odlažem paradajz na pozu odlaganja.' };
+  if (/test hvataljk/.test(t)) return { send: ['tomatoClawTest'], reply: 'Testiram hvataljku.' };
+  if (/mask/.test(t) && /kalibr/.test(t)) return { send: ['tomatoCalibClawMask'], reply: 'Kalibrišem masku hvataljke – ne pomeraj robota.' };
+  if (/(otvori|pusti).*hvataljk/.test(t)) return { jog: ['loose', 'stop', 800], reply: 'Otvaram hvataljku.' };
+  if (/zatvori.*hvataljk/.test(t)) return { jog: ['grab', 'stop', 800], reply: 'Zatvaram hvataljku.' };
+  if (/\buhvati\b|\bhvataj\b/.test(t)) return { send: ['tomatoManualGrab'], reply: 'Hvatam paradajz ovde.' };
+  if (/ruk[aeu]? (gore|podigni)|podigni ruku/.test(t)) return { jog: ['armup', 'armstop', 600], reply: 'Ruka gore.' };
+  if (/ruk[aeu]? (dole|spusti)|spusti ruku/.test(t)) return { jog: ['armdown', 'armstop', 600], reply: 'Ruka dole.' };
+  if (/(okreni|pogledaj) (levo|lijevo)/.test(t)) return { jog: ['lookleft', 'LRstop', 600], reply: 'Gledam levo.' };
+  if (/(okreni|pogledaj) desno/.test(t)) return { jog: ['lookright', 'LRstop', 600], reply: 'Gledam desno.' };
+  if (/(uberi|beri|uzmi) (jedan|jednu|1)/.test(t)) return { send: ['tomatoPickOne'], reply: 'Berem jedan paradajz.' };
+  if (/\b(koliko|statistik|ubrao|ubrano)\b/.test(t)) return { reply: 'Ubrano: ' + (st.pickedCount || 0) + ', u kantici: ' + (st.bucketCount || 0) +
+    ', prilazaka: ' + (st.attempts || 0) + (st.avgCycle ? ', prosečan ciklus ' + Math.round(st.avgCycle) + ' s' : '') + '.' };
+  if (/\b(kreni|pokreni|start|pocni|beri|uberi|berba|berbu)\b/.test(t)) return { send: ['tomatoStart'], reply: 'Pokrećem berbu.' };
+  if (/(nije u redu|problem|savet|preporuk|sta da radim|zasto ne|ne radi|pomozi)/.test(t)) {
+    var ins = (st.assistant || []).filter(function (i) { return i.level !== 'ok'; });
+    if (!ins.length) return { reply: 'Sve izgleda u redu. 👍' };
+    return { reply: ins.slice(0, 3).map(function (i) { return '• ' + i.title + ': ' + i.text; }).join('\n'), tab: 'ai' };
+  }
+  if (/\b(status|stanje|sta radis|gde si)\b/.test(t)) return { reply: 'Stanje: ' + (st.state || '–') + (st.running ? ' (radim)' : ' (mirujem)') + '. ' + (st.lastInfo || '') };
+  if (/\b(zdravo|cao|hej|pozdrav)\b/.test(t)) return { reply: 'Zdravo! Napiši „pomoć“ da vidiš šta znam.' };
+  return { reply: 'Nisam razumeo „' + raw + '“. Napiši „pomoć“ za listu komandi.' };
+}
+/*CMD-END*/
+
+(function () {
+  'use strict';
+  var WS_PORT = 8888, WS_AUTH = 'admin:123456', POLL_MS = 600, INFO_MS = 4000;
+  var FLOW = [['TRAZENJE', 'Traži'], ['CENTRIRANJE', 'Centrira'], ['PRILAZAK', 'Prilazi'], ['SPUSTANJE', 'Spušta'], ['NAVODJENJE', 'Navodi'],
+    ['HVATANJE', 'Hvata'], ['TRAZENJE_KANTICE', 'Kantica'], ['PRILAZAK_KANTICI', 'Do kantice'], ['UBACIVANJE', 'Ubacuje']];
+  var STATE_TEXT = {
+    'IDLE': ['MIRUJE', 'Spreman', ''],
+    'TRAZENJE': ['TRAŽENJE', 'Okreće kameru i traži paradajz', 'run'],
+    'CENTRIRANJE': ['CENTRIRANJE', 'Dovodi paradajz na sredinu pogleda', 'run'],
+    'PRILAZAK': ['PRILAZAK', 'Prilazi paradajzu u kratkim impulsima', 'run'],
+    'SPUSTANJE': ['SPUŠTANJE RUKE', 'Polako spušta ruku i otvara hvataljku', 'grab'],
+    'NAVODJENJE': ['NAVOĐENJE', 'Dovodi paradajz između prstiju', 'grab'],
+    'HVATANJE': ['HVATANJE', 'Polako zatvara hvataljku i podiže', 'grab'],
+    'TRAZENJE_KANTICE': ['TRAŽI KANTICU', 'Nosi paradajz i traži zelenu kanticu', 'bucket'],
+    'PRILAZAK_KANTICI': ['DO KANTICE', 'Prilazi kantici', 'bucket'],
+    'UBACIVANJE': ['UBACIVANJE', 'Ruka iznad kantice, polako otvara', 'bucket'],
+    'ODLAGANJE': ['ODLAGANJE', 'Ostavlja paradajz na pozu odlaganja', 'bucket']
+  };
+  var EPISODE_TEXT = { full: 'berba', one: 'jedan paradajz', grab: 'ručno: uhvati', deliver: 'ručno: u kanticu', place: 'ručno: odloži' };
+  var BUSY_TEXT = { wave: 'mahanje', claw: 'test hvataljke', home: 'povratak', clawmask: 'kalibracija maske', pose: 'provera poze', watch: 'poza za lica' };
+
+  function $(id) { return document.getElementById(id); }
+  function qa(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function clock(ts) { var d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+  function dur(sec) { sec = Math.max(0, Math.floor(sec || 0)); var h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60; return (h ? h + ':' + pad(m) : pad(m)) + ':' + pad(s); }
+  function fmt(v, d) { return (v === null || v === undefined || isNaN(v)) ? '–' : Number(v).toFixed(d || 0); }
+  function setText(el, t) { if (el && el.textContent !== t) el.textContent = t; }
+  function setDot(el, cls) { el.className = 'dot' + (cls ? ' ' + cls : ''); }
+  function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+  function initials(n) { var p = String(n || '?').trim().split(/\s+/); return ((p[0] || '?')[0] + (p[1] ? p[1][0] : '')).toUpperCase(); }
+  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+  var toastTimer = null;
+  function toast(text, isErr, ms) {
+    var t = $('toast'); t.textContent = text; t.className = 'toast show' + (isErr ? ' err' : '');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.className = 'toast' + (isErr ? ' err' : ''); }, ms || 3400);
+  }
+
+  // ------------------------------------------------------------------ glas
+  var voiceOn = false;
+  function speak(text) {
+    if (!voiceOn || !('speechSynthesis' in window)) return;
+    try {
+      var u = new SpeechSynthesisUtterance(text);
+      var vs = speechSynthesis.getVoices() || [];
+      var v = vs.filter(function (x) { return /^(sr|hr|bs)/i.test(x.lang); })[0];
+      if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = 'sr-RS'; }
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+
+  // ------------------------------------------------------------------ veza
+  var pendingStop = false;
+  var ws = null, authed = false, pollTimer = null, infoTimer = null, lastPong = 0, lastEventId = 0, status = null, bootId = null;
+  function connect() {
+    try { ws = new WebSocket('ws://' + (location.hostname || '127.0.0.1') + ':' + WS_PORT + '/'); }
+    catch (e) { setTimeout(connect, 2000); return; }
+    authed = false;
+    ws.onopen = function () { ws.send(WS_AUTH); };
+    ws.onmessage = function (evt) {
+      if (!authed) {
+        if (String(evt.data).indexOf('congratulation') === -1) { setConn(false, 'Prijava odbijena'); return; }
+        authed = true; setConn(true); localEvent('Povezano sa robotom.');
+        if (pendingStop) { pendingStop = false; send('tomatoStop'); send('DS'); send('TS'); localEvent('STOP poslat odmah po povezivanju.', 'warn'); }
+        send('tomatoPreview'); send('tomatoGetSettings');
+        clearInterval(pollTimer); pollTimer = setInterval(poll, POLL_MS);
+        clearInterval(infoTimer); infoTimer = setInterval(function () { send('get_info'); }, INFO_MS);
+        poll(); send('get_info');
+        return;
+      }
+      lastPong = Date.now();
+      var msg; try { msg = JSON.parse(evt.data); } catch (e) { return; }
+      if (!msg || !msg.title) return;
+      if (msg.title === 'tomatoStatus' && msg.data) applyStatus(msg.data);
+      else if (msg.title === 'tomatoMsg' && msg.data) toast(msg.data);
+      else if (msg.title === 'tomatoSettings' && msg.data) { renderSettings(msg.data); if (msg.msg) toast(msg.msg, msg.status === 'error'); }
+      else if (msg.title === 'get_info' && msg.data) applyInfo(msg.data);
+    };
+    ws.onclose = function () {
+      if (authed) localEvent('Veza sa robotom prekinuta – ponovo se povezujem…', 'warn');
+      authed = false; setConn(false); clearInterval(pollTimer); clearInterval(infoTimer);
+      setTimeout(connect, 2000);
+    };
+    ws.onerror = function () { try { ws.close(); } catch (e) {} };
+  }
+  function send(c) { if (ws && authed && ws.readyState === WebSocket.OPEN) { ws.send(c); return true; } return false; }
+  function sendJson(title, data) { return send(JSON.stringify({ title: title, data: data })); }
+  function cmd(c) { if (!send(c)) toast('Nema veze sa robotom.', true); }
+  function poll() {
+    if (lastPong && Date.now() - lastPong > 6000) { try { ws.close(); } catch (e) {} lastPong = 0; return; }
+    sendJson('tomatoStatus', { eventsAfter: lastEventId });
+  }
+  function setConn(ok, text) {
+    setDot($('connDot'), ok ? 'ok' : 'bad');
+    setText($('connText'), text || (ok ? 'Povezano' : 'Nije povezano'));
+    if (ok) lastPong = Date.now();
+  }
+  var cpuTemp = null;
+  function applyInfo(d) {
+    var t = parseFloat(d[0]), u = parseFloat(d[1]);
+    cpuTemp = isNaN(t) ? null : t;
+    var p = $('cpuPill');
+    setText(p, 'CPU ' + (isNaN(t) ? '–' : t.toFixed(0) + '°C') + ' · ' + (isNaN(u) ? '–' : u.toFixed(0) + '%'));
+    p.style.color = t >= 75 ? 'var(--tomato)' : (t >= 65 ? 'var(--amber)' : '');
+  }
+
+  // ------------------------------------------------------------------ tabovi
+  var VIEWS = ['live', 'calib', 'people', 'ai', 'settings', 'log'];
+  function showView(v) {
+    if (v === 'face') v = 'people';
+    if (VIEWS.indexOf(v) < 0) v = 'live';
+    qa('.tab').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-view') === v); });
+    qa('.view').forEach(function (s) { s.classList.toggle('active', s.id === 'view-' + v); });
+    var slot = { calib: 'calibVideoSlot', people: 'peopleVideoSlot' }[v];
+    var vid = $('videoBlock'), home = slot ? $(slot) : $('videoHome');
+    if (vid.parentNode !== home) home.appendChild(vid);
+    // prekidaci za osobe se prikazuju i na tabu "Osobe"
+    var rows = [$('recogToggle').closest('.toggle-row'), $('waveToggle').closest('.toggle-row')];
+    var target = v === 'people' ? $('peopleToggleSlot') : $('optToggles');
+    rows.forEach(function (r) { if (r.parentNode !== target) target.appendChild(r); });
+    if (v === 'settings') send('tomatoGetSettings');
+    if (v === 'live') lastSample = 0;
+    try { localStorage.setItem('tomatoView', v); } catch (e) {}
+  }
+  qa('.tab').forEach(function (t) { t.addEventListener('click', function () { showView(t.getAttribute('data-view')); }); });
+  qa('[data-goto]').forEach(function (b) { b.addEventListener('click', function () { showView(b.getAttribute('data-goto')); }); });
+
+  // ------------------------------------------------------------------ video
+  var img = $('videoImg');
+  function startVideo() { img.src = '/video_feed?t=' + Date.now(); }
+  img.addEventListener('load', function () { $('video').classList.remove('offline'); });
+  img.addEventListener('error', function () { $('video').classList.add('offline'); setTimeout(startVideo, 2000); });
+  var tapMode = 'off';
+  function setTapMode(m) {
+    tapMode = m;
+    qa('#tapSeg button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-tap') === m); });
+    $('video').classList.toggle('tap', m !== 'off'); $('video').classList.toggle('bucket', m === 'bucket');
+    setText($('videoMsg'), m === 'tomato' ? 'Dodirni sredinu paradajza' : (m === 'bucket' ? 'Dodirni sredinu kantice' : ''));
+  }
+  qa('#tapSeg button').forEach(function (b) { b.addEventListener('click', function () { setTapMode(b.getAttribute('data-tap')); }); });
+  qa('[data-tapmode]').forEach(function (b) { b.addEventListener('click', function () { setTapMode(b.getAttribute('data-tapmode')); toast('Sada dodirni objekat na videu.'); }); });
+  function imagePoint(evt) {
+    var r = img.getBoundingClientRect(), iw = img.naturalWidth, ih = img.naturalHeight;
+    if (!iw || !ih) return null;
+    var s = Math.min(r.width / iw, r.height / ih), ox = (r.width - iw * s) / 2, oy = (r.height - ih * s) / 2;
+    var cx = (evt.touches ? evt.touches[0].clientX : evt.clientX) - r.left, cy = (evt.touches ? evt.touches[0].clientY : evt.clientY) - r.top;
+    var px = (cx - ox) / s, py = (cy - oy) / s;
+    if (px < 0 || py < 0 || px >= iw || py >= ih) return null;
+    return { x: Math.round(px), y: Math.round(py), dx: cx, dy: cy };
+  }
+  function onTap(evt) {
+    if (tapMode === 'off') return;
+    evt.preventDefault();
+    var p = imagePoint(evt); if (!p) return;
+    var m = $('tapMarker'); m.style.left = p.dx + 'px'; m.style.top = p.dy + 'px';
+    m.style.borderColor = tapMode === 'bucket' ? 'var(--leaf)' : '#fff'; m.classList.add('show');
+    setTimeout(function () { m.classList.remove('show'); }, 900);
+    sendJson(tapMode === 'bucket' ? 'bucketCalib' : 'tomatoCalib', [p.x, p.y]);
+    setTapMode('off');
+  }
+  $('video').addEventListener('click', onTap);
+  $('video').addEventListener('touchstart', onTap, { passive: false });
+  var maskOn = false;
+  $('maskBtn').addEventListener('click', function () { cmd(maskOn ? 'tomatoMaskOff' : 'tomatoMaskOn'); });
+
+  // ------------------------------------------------------------------ komande
+  function stopAll() {
+    if (send('tomatoStop')) { send('DS'); send('TS'); pendingStop = false; localEvent('Zatraženo zaustavljanje.', 'warn'); return; }
+    // nema veze: STOP se salje cim se veza obnovi
+    pendingStop = true;
+    toast('NEMA VEZE sa robotom – STOP će biti poslat čim se veza obnovi.', true);
+    localEvent('STOP nije poslat (nema veze) – šalje se po povezivanju.', 'warn');
+  }
+  $('estopBtn').addEventListener('click', stopAll);
+  qa('[data-stop]').forEach(function (b) { b.addEventListener('click', stopAll); });
+  $('startBtn').addEventListener('click', function () { cmd('tomatoStart'); });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-cmd]');
+    if (b && !b.disabled) cmd(b.getAttribute('data-cmd'));
+  });
+  qa('#modeSeg button').forEach(function (b) { b.addEventListener('click', function () { cmd(b.getAttribute('data-mode') === 'manual' ? 'tomatoModeManual' : 'tomatoModeAuto'); }); });
+  $('aiPill').addEventListener('click', function () { cmd(status && status.ui && status.ui.assistant ? 'tomatoAssistantOff' : 'tomatoAssistantOn'); });
+  $('voicePill').addEventListener('click', function () {
+    var want = !(status && status.ui && status.ui.voice);
+    cmd(want ? 'tomatoVoiceOn' : 'tomatoVoiceOff');
+    if (want) { voiceOn = true; speak('Glasovne poruke su uključene.'); }
+  });
+  document.addEventListener('keydown', function (e) {
+    var t = e.target || {}, tag = t.tagName || '';
+    // tekstualna polja: tamo Space pise razmak; prekidaci/klizaci NE "gutaju" STOP
+    var typing = tag === 'TEXTAREA' || tag === 'SELECT' || (tag === 'INPUT' && /^(text|search|number|email|password|)$/.test(t.type || ''));
+    if (e.key === 'Escape') { e.preventDefault(); if (typing) t.blur(); stopAll(); return; }
+    if (typing) return;
+    if (e.code === 'Space') { e.preventDefault(); if (tag === 'INPUT' && t.blur) t.blur(); stopAll(); return; }
+    if (e.key === '/') { e.preventDefault(); showView('ai'); $('cmdInput').focus(); }
+    var n = parseInt(e.key, 10);
+    if (n >= 1 && n <= VIEWS.length) showView(VIEWS[n - 1]);
+  });
+
+  // ------------------------------------------------------------------ prekidaci
+  var busyT = {};
+  function bindToggle(id, onCmd, offCmd) {
+    $(id).addEventListener('change', function () { busyT[id] = Date.now(); cmd(this.checked ? onCmd : offCmd); });
+  }
+  function syncToggle(id, val, disabled) {
+    var el = $(id); if (Date.now() - (busyT[id] || 0) > 1500) el.checked = !!val;
+    el.disabled = !!disabled;
+  }
+  bindToggle('bucketToggle', 'tomatoBucketOn', 'tomatoBucketOff');
+  bindToggle('recogToggle', 'tomatoRecogOn', 'tomatoRecogOff');
+  bindToggle('waveToggle', 'tomatoWaveOn', 'tomatoWaveOff');
+  bindToggle('aiToggle', 'tomatoAssistantOn', 'tomatoAssistantOff');
+  bindToggle('logToggle', 'tomatoLogOn', 'tomatoLogOff');
+
+  // ------------------------------------------------------------------ rucna kontrola
+  var JOG_HTML =
+    '<div class="jog">' +
+    '<div class="jog-grp"><div class="t">Ruka <b data-ang="2">–</b></div><div class="btn-row"><button class="btn" data-hold="armup" data-release="armstop">▲ Gore</button><button class="btn" data-hold="armdown" data-release="armstop">▼ Dole</button></div></div>' +
+    '<div class="jog-grp"><div class="t">Zglob / kamera <b data-ang="3">–</b></div><div class="btn-row"><button class="btn" data-hold="handup" data-release="HAstop">▲ Gore</button><button class="btn" data-hold="handdown" data-release="HAstop">▼ Dole</button></div></div>' +
+    '<div class="jog-grp"><div class="t">Okret ruke <b data-ang="1">–</b></div><div class="btn-row"><button class="btn" data-hold="lookleft" data-release="LRstop">◀ Levo</button><button class="btn" data-hold="lookright" data-release="LRstop">Desno ▶</button></div></div>' +
+    '<div class="jog-grp"><div class="t">Hvataljka <b data-ang="4">–</b></div><div class="btn-row"><button class="btn" data-hold="loose" data-release="stop">Otvori</button><button class="btn" data-hold="grab" data-release="stop">Zatvori</button></div></div>' +
+    '<div class="jog-grp wide"><div class="t">Vožnja <span>kratkim pritiskom</span></div><div class="btn-row">' +
+    '<button class="btn" data-hold="left" data-release="TS">↖ Levo</button><button class="btn" data-hold="forward" data-release="DS">▲ Napred</button>' +
+    '<button class="btn" data-hold="backward" data-release="DS">▼ Nazad</button><button class="btn" data-hold="right" data-release="TS">Desno ↗</button></div></div></div>';
+  qa('[data-jog]').forEach(function (s) { s.innerHTML = JOG_HTML; });
+  var held = null;
+  function release() { if (!held) return; send(held.getAttribute('data-release')); held.classList.remove('held'); held = null; }
+  qa('[data-hold]').forEach(function (b) {
+    b.addEventListener('pointerdown', function (e) {
+      if (b.disabled) return; e.preventDefault(); release(); held = b; b.classList.add('held');
+      try { b.setPointerCapture(e.pointerId); } catch (err) {}
+      send(b.getAttribute('data-hold'));
+    });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (ev) { b.addEventListener(ev, release); });
+    b.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  });
+  window.addEventListener('blur', release);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) release(); });
+
+  // ------------------------------------------------------------------ tok faza
+  (function () {
+    var f = $('flow');
+    FLOW.forEach(function (s) {
+      var d = document.createElement('div'); d.className = 'st';
+      d.innerHTML = '<div class="bar"></div><div class="nm"></div>'; d.querySelector('.nm').textContent = s[1]; f.appendChild(d);
+    });
+  })();
+  function renderFlow(state) {
+    var idx = -1; FLOW.forEach(function (s, i) { if (s[0] === state) idx = i; });
+    if (state === 'ODLAGANJE') idx = FLOW.length - 1;
+    qa('#flow .st').forEach(function (el, i) { el.classList.toggle('cur', i === idx); el.classList.toggle('done', idx >= 0 && i < idx); });
+  }
+
+  // ------------------------------------------------------------------ grafici
+  var series = { conf: [], bucket: [], fps: [], temp: [] }, lastSample = 0;
+  function pushSample(k, v) { var a = series[k]; a.push(v); if (a.length > 100) a.shift(); }
+  function drawSpark(id, arr, maxV, rgb) {
+    var c = $(id); if (!c || !c.offsetWidth) return;
+    var dpr = window.devicePixelRatio || 1, w = c.offsetWidth, h = 40;
+    if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = h * dpr; }
+    var g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(255,255,255,.06)'; g.lineWidth = 1; g.beginPath(); g.moveTo(0, h - .5); g.lineTo(w, h - .5); g.stroke();
+    var pts = arr.length; if (pts < 2) return;
+    var step = w / 99, x0 = w - (pts - 1) * step;
+    g.beginPath();
+    arr.forEach(function (v, i) { var y = v == null ? h - 1 : h - 2 - clamp01(v / maxV) * (h - 5); var x = x0 + i * step; if (i) g.lineTo(x, y); else g.moveTo(x, y); });
+    g.strokeStyle = 'rgb(' + rgb + ')'; g.lineWidth = 1.8; g.lineJoin = 'round'; g.stroke();
+    g.lineTo(w, h); g.lineTo(x0, h); g.closePath(); g.fillStyle = 'rgba(' + rgb + ',.12)'; g.fill();
+  }
+  function updateCharts(d) {
+    var now = Date.now(); if (now - lastSample < 600) return; lastSample = now;
+    var t = d.telemetry || {}, b = d.bucket || {};
+    pushSample('conf', t.detected || t.tracking ? (t.conf || 0) * 100 : 0);
+    pushSample('bucket', b.detected ? (b.widthPct || 0) : 0);
+    pushSample('fps', t.cameraStale ? 0 : (t.fps || 0));
+    pushSample('temp', cpuTemp);
+    if (!$('view-live').classList.contains('active')) return;
+    drawSpark('chConf', series.conf, 100, '255,91,69'); setText($('chConfV'), t.detected ? Math.round((t.conf || 0) * 100) + '%' : '–');
+    drawSpark('chBucket', series.bucket, Math.max(60, (b.targetPct || 45) * 1.3), '79,210,122'); setText($('chBucketV'), b.detected ? Math.round(b.widthPct) + '/' + Math.round(b.targetPct) + '%' : '–');
+    drawSpark('chFps', series.fps, 25, '91,182,255'); setText($('chFpsV'), fmt(t.fps, 1) + ' fps');
+    drawSpark('chTemp', series.temp, 85, '255,190,85'); setText($('chTempV'), cpuTemp == null ? '–' : Math.round(cpuTemp) + '°C');
+  }
+
+  // ------------------------------------------------------------------ status
+  var lastPicked = null, lastBucket = null;
+  function bump(el) { el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
+  function applyStatus(d) {
+    var rebooted = !!(d.bootId && bootId !== null && d.bootId !== bootId);
+    if (rebooted) { lastEventId = 0; localEvent('Server robota je restartovan.', 'warn'); }
+    if (d.bootId) bootId = d.bootId;
+    status = d;
+    var ui = d.ui || {};
+    voiceOn = !!ui.voice;
+    var manual = ui.controlMode === 'manual';
+    qa('#modeSeg button').forEach(function (b) { var m = b.getAttribute('data-mode'); b.classList.toggle('on', (m === 'manual') === manual); b.classList.toggle('manual', m === 'manual'); });
+    $('autoActions').classList.toggle('hide', manual); $('manualActions').classList.toggle('hide', !manual);
+    $('manualJogCard').classList.toggle('hide', !manual);
+    setDot($('aiDot'), ui.assistant ? 'ok' : ''); $('aiPill').classList.toggle('on', !!ui.assistant);
+    setText($('voiceIco'), ui.voice ? '🔊' : '🔇'); $('voicePill').classList.toggle('on', !!ui.voice);
+
+    var st = d.state || 'IDLE', info = STATE_TEXT[st] || [st, '', 'run'];
+    setText($('stateBadge'), info[0]); $('stateBadge').className = 'state-badge' + (info[2] ? ' ' + info[2] : '');
+    setText($('stateSub'), d.running ? (EPISODE_TEXT[d.episode] || '') + ' · ' + info[1] : (d.busy ? 'pokret: ' + (BUSY_TEXT[d.busy] || d.busy) : info[1]));
+    setText($('stateFor'), d.running ? 'u fazi ' + dur(d.stateFor) : '');
+    var tel = d.telemetry || {};
+    setText($('hudFps'), d.running ? info[0] : (tel.cameraStale ? 'slika kasni' : fmt(tel.fps, 1) + ' fps'));
+    renderFlow(st);
+    setText($('infoLine'), d.lastInfo || ''); setText($('errLine'), d.lastError || '');
+    $('startBtn').disabled = !!d.running;
+    qa('#manualActions [data-cmd], #autoActions [data-cmd]').forEach(function (b) { b.disabled = !!d.running; });
+
+    if (lastPicked !== null && d.pickedCount > lastPicked) {
+      bump($('stPicked'));
+      var inB = d.bucketCount > lastBucket;
+      speak(inB ? 'Paradajz je u kantici.' : 'Paradajz je ubran.');
+    }
+    if (lastBucket !== null && d.bucketCount > lastBucket) bump($('stBucket'));
+    lastPicked = d.pickedCount; lastBucket = d.bucketCount;
+    var s = d.stats || {};
+    setText($('stPicked'), String(d.pickedCount)); setText($('stBucket'), String(d.bucketCount));
+    setText($('stAttempts'), String(d.attempts));
+    setText($('stRate'), s.grabAttempts ? Math.round(100 * (s.grabAttempts - (s.grabFails || 0)) / s.grabAttempts) + '%' : '–');
+    setText($('stRun'), dur(d.runTime)); setText($('stCycle'), d.avgCycle ? fmt(d.avgCycle, 0) + ' s' : '–');
+
+    var b = d.bucket || {}, f = d.face || {};
+    var tOn = !!tel.detected, tTrk = !!tel.tracking;
+    setDot($('snTomatoDot'), tOn ? 'ok' : (tTrk ? 'warn' : '')); $('snTomato').className = 'sensor' + (tOn ? ' on' : (tTrk ? ' mid' : ''));
+    setText($('snTomatoS'), tOn ? 'vidljiv · ' + Math.round((tel.conf || 0) * 100) + '% sigurno' : (tTrk ? 'proveravam kandidata…' : 'nije vidljiv'));
+    $('snTomatoM').style.width = (tOn && tel.radius && tel.targetRadius ? Math.round(clamp01(tel.radius / tel.targetRadius) * 100) : 0) + '%';
+    setDot($('hudTomato'), tOn ? 'ok' : (tTrk ? 'warn' : ''));
+    var bOn = !!b.detected;
+    setDot($('snBucketDot'), bOn ? 'ok' : ''); $('snBucket').className = 'sensor' + (bOn ? ' on' : '');
+    setText($('snBucketS'), bOn ? fmt(b.widthPct, 0) + '% širine (cilj ' + fmt(b.targetPct, 0) + '%)' + (b.occludedPct > 5 ? ' · zaklonjeno ' + b.occludedPct + '%' : '') : (b.enabled ? 'nije vidljiva' : 'isključena'));
+    $('snBucketM').style.width = (bOn && b.widthPct ? Math.round(clamp01(b.widthPct / (b.targetPct || 45)) * 100) : 0) + '%';
+    setDot($('hudBucket'), bOn ? 'ok' : '');
+    var rec = f.recognized || [], fOn = rec.length > 0;
+    setDot($('snFaceDot'), fOn ? 'ok' : (f.faces ? 'warn' : '')); $('snFace').className = 'sensor' + (fOn ? ' on' : (f.faces ? ' mid' : ''));
+    setText($('snFaceS'), !f.available ? 'nedostupno' : (f.enrolling ? 'učim: ' + f.enrollName + ' ' + f.progress[0] + '/' + f.progress[1] :
+      (!(f.recognize || f.enabled) ? 'isključeno' : (f.paused ? 'pauzirano (berba)' : (fOn ? rec.map(function (p) { return p.name; }).join(', ') : (f.faces ? 'nepoznato lice' : 'nema nikoga'))))));
+    $('snFaceM').style.width = (f.best != null ? Math.round(clamp01(f.best) * 100) : 0) + '%';
+    var hn = $('hudNames'), html = rec.map(function (p) { return '<span class="hud name">👤 ' + escapeHtml(p.name) + ' ' + Math.round(p.sim * 100) + '%</span>'; }).join(' ');
+    if (hn.getAttribute('data-h') !== html) { hn.innerHTML = html; hn.setAttribute('data-h', html); }
+    setText($('kvCam'), (tel.cameraStale ? 'slika kasni' : fmt(tel.fps, 1) + ' fps') + ' · ' + (tel.candidates || 0) + ' kand. · model ' + (tel.modelOk ? 'OK' : 'NEDOSTAJE'));
+    setText($('kvPan'), fmt(tel.pan, 0) + '° / ' + fmt(tel.steer, 0) + '°');
+    setText($('kvLight'), tel.brightness == null ? '–' : Math.round(tel.brightness) + ' / 255' + (tel.brightness < 55 ? ' (tamno)' : tel.brightness > 215 ? ' (presvetlo)' : ''));
+    if (tel.color && b.color) setText($('kvColor'), 'H' + tel.color.hue_center + '±' + tel.color.hue_halfwidth + ' / H' + b.color.hue_center + '±' + b.color.hue_halfwidth);
+    maskOn = !!tel.mask; $('maskBtn').classList.toggle('on', maskOn);
+    syncToggle('logToggle', tel.logEnabled);
+    setText($('logSub'), 'Svake 2 s snima sirovi frejm i rezultat detekcije (za treniranje). Snimljeno: ' + (tel.logCount || 0) + (tel.logError ? ' · ' + tel.logError : ''));
+
+    syncToggle('bucketToggle', b.enabled);
+    var bs = $('bucketSub');
+    if (b.enabled && b.target !== 'bucket') { setText(bs, 'Uključeno, ali kantica NIJE kalibrisana – odlaže na pozu odlaganja.'); bs.className = 'warn'; }
+    else { setText(bs, b.enabled ? 'Robot nađe zelenu kanticu i ubaci paradajz.' : 'Isključeno – paradajz se ostavlja na pozu odlaganja.'); bs.className = ''; }
+    syncToggle('recogToggle', f.recognize, !f.available); syncToggle('waveToggle', f.enabled, !f.available);
+    syncToggle('aiToggle', ui.assistant);
+
+    applyCalib(d); applyPeople(f); applyServo(d.servo || {}, d.running); applyAssistant(d.assistant, ui.assistant);
+    updateCharts(d);
+    if (!rebooted && d.events && d.events.length) addEvents(d.events);
+  }
+
+  function stepState(id, tagId, ok, okTxt, todoTxt, neutral) {
+    var s = $(id); s.classList.toggle('ok', !!ok); s.classList.toggle('todo', !ok && !neutral);
+    var tg = $(tagId); tg.className = 'tag ' + (ok ? 'ok' : (neutral ? 'info' : 'todo')); setText(tg, ok ? okTxt : todoTxt);
+  }
+  function applyCalib(d) {
+    var c = d.calib || {}, b = d.bucket || {};
+    function pose(p) { return (p && p[0] !== null && p[0] !== undefined && p[p.length - 1] !== null) ? p.join('° / ') + '°' : 'nije snimljeno'; }
+    setText($('metaLook'), 'ruka / zglob: ' + pose(c.lookPose));
+    setText($('metaClaw'), c.claw ? 'otvorena ' + c.claw[0] + '°, zatvorena ' + c.claw[1] + '°' : '');
+    stepState('stepGrab', 'tagGrab', c.grab, 'kalibrisano', 'obavezno'); setText($('metaGrab'), 'ruka / zglob: ' + pose(c.grabPose));
+    stepState('stepPlace', 'tagPlace', c.place, 'snimljeno', 'preporučeno'); setText($('metaPlace'), 'okret / ruka / zglob: ' + pose(c.placePose));
+    var useB = c.depositMode === 'bucket';
+    stepState('stepBucket', 'tagBucket', c.bucket, 'kalibrisano', useB ? 'potrebno' : 'kantica isključena', !useB);
+    setText($('metaBucket'), c.bucket ? 'ciljna širina ' + fmt(b.targetPct, 0) + '% · poza nošenja ' + pose(c.carryPose) : 'nije kalibrisano');
+    stepState('stepDrop', 'tagDrop', c.drop, 'snimljeno', useB ? 'preporučeno' : 'kantica isključena', !useB);
+    setText($('metaDrop'), 'ruka / zglob: ' + pose(c.dropPose));
+    var mk = (c.clawMask || []).length === 2;
+    stepState('stepMask', 'tagMask', mk, 'kalibrisano', 'automatska procena', true);
+    setText($('metaMask'), mk ? 'otvorena i zatvorena hvataljka' : ((c.clawMask || []).length ? 'samo: ' + c.clawMask.join(', ') : 'nije kalibrisano'));
+    var missing = [];
+    if (!c.grab) missing.push('hvatanje');
+    if (useB && !c.bucket) missing.push('kanticu');
+    $('calibBadge').classList.toggle('hide', !missing.length);
+    var w = $('calibWarn'); w.classList.toggle('hide', !missing.length);
+    if (missing.length) setText(w, 'Kalibriši ' + missing.join(' i ') + ' (tab „Kalibracija“).');
+  }
+  function applyServo(s, running) {
+    qa('[data-ang]').forEach(function (el) { var k = el.getAttribute('data-ang'); setText(el, s[k] !== undefined ? s[k] + '°' : '–'); });
+    qa('[data-hold]').forEach(function (b) { b.disabled = !!running; });
+    if (running) release();
+    qa('.jog-note').forEach(function (n) { n.classList.toggle('hide', !running); });
+  }
+
+  // ------------------------------------------------------------------ osobe
+  var lastPeopleSig = '', editing = null, lastGreetT = null;
+  function applyPeople(f) {
+    $('faceUnavail').classList.toggle('hide', !!f.available);
+    if (!f.available) setText($('faceUnavail'), 'Prepoznavanje lica nije dostupno: ' + (f.reason || 'nepoznat razlog'));
+    setText($('pplModel'), f.available ? (f.detector === 'yunet' ? 'YuNet' : 'Haar') + ' + SFace · ' + (f.ms || 0) + ' ms · prag ' + Math.round((f.threshold || 0.4) * 100) + '%' : '');
+    var rec = f.recognized || [], sn = $('seenNow');
+    var shtml = !(f.recognize || f.enabled) ? '<span class="small">Prepoznavanje je isključeno – uključi ga prekidačem desno.</span>' : (f.paused ? '<span class="small">Pauzirano dok robot bere.</span>' :
+      (rec.length ? rec.map(function (p) { return '<span class="seen-chip">👤 ' + escapeHtml(p.name) + ' · ' + Math.round(p.sim * 100) + '%</span>'; }).join('') :
+        '<span class="small">' + (f.faces ? 'U kadru je lice koje robot ne prepoznaje.' : 'Nema nikoga ispred kamere.') + '</span>'));
+    if (sn.getAttribute('data-h') !== shtml) { sn.innerHTML = shtml; sn.setAttribute('data-h', shtml); }
+    var g = f.greeting, gt = g ? g.t : 0;
+    if (lastGreetT !== null && gt > lastGreetT) {
+      var gb = $('greetBanner'); gb.textContent = '👋 Zdravo, ' + g.name + '!'; gb.classList.add('show');
+      setTimeout(function () { gb.classList.remove('show'); }, 2600);
+      speak('Zdravo, ' + g.name + '!');
+    }
+    lastGreetT = gt;
+    var p = f.progress || [0, 1];
+    $('enrollBar').style.width = (f.enrolling ? Math.round(100 * p[0] / Math.max(1, p[1])) : 0) + '%';
+    var cov = f.coverage || {};
+    qa('#enrollCover span').forEach(function (s) { s.classList.toggle('ok', (cov[s.getAttribute('data-k')] || 0) >= 2); });
+    setText($('enrollMsg'), f.msg || 'Upiši ime i pritisni „Nauči lice“.');
+    $('enrollBtn').disabled = !f.available || f.enrolling || !!(status && status.running);
+    $('enrollCancelBtn').classList.toggle('hide', !f.enrolling);
+    var people = f.people || [];
+    setText($('pplCount'), people.length ? people.length + ' ' + (people.length === 1 ? 'osoba' : 'osobe') : '');
+    var seenIds = rec.map(function (r) { return r.pid; });
+    var sig = JSON.stringify(people) + '|' + seenIds.join(',');
+    if (sig === lastPeopleSig || editing) return;
+    lastPeopleSig = sig;
+    var list = $('peopleList');
+    if (!people.length) { list.innerHTML = '<div class="empty">Još nijedna osoba nije naučena.</div>'; return; }
+    list.innerHTML = '';
+    people.forEach(function (pp) {
+      var seen = seenIds.indexOf(pp.id) >= 0;
+      var row = document.createElement('div'); row.className = 'person' + (seen ? ' seen' : '');
+      row.innerHTML = '<div class="avatar"></div><div style="min-width:0"><div class="nm"></div><div class="sub"></div></div>' +
+        '<div class="acts"><label class="wv" title="Mahni ovoj osobi"><span class="switch"><input type="checkbox"><span></span></span>maši</label>' +
+        '<button class="btn sm" data-a="more" title="Dopuni uzorke lica">+ uzorci</button><button class="btn sm" data-a="ren">Ime</button>' +
+        '<button class="btn sm ghost-red" data-a="del">Obriši</button></div>';
+      row.querySelector('.avatar').textContent = initials(pp.name);
+      row.querySelector('.nm').textContent = pp.name;
+      row.querySelector('.sub').textContent = pp.samples + ' uzoraka' + (pp.created ? ' · ' + pp.created : '') + (seen ? ' · vidim ga sada' : '');
+      var wv = row.querySelector('input'); wv.checked = !!pp.wave;
+      wv.addEventListener('change', function () { sendJson('faceWave', { pid: pp.id, on: wv.checked }); });
+      row.querySelector('[data-a=more]').addEventListener('click', function () { sendJson('faceEnroll', { pid: pp.id }); });
+      row.querySelector('[data-a=ren]').addEventListener('click', function () {
+        editing = pp.id;
+        var nm = row.querySelector('.nm'), inp = document.createElement('input'); inp.className = 'input'; inp.value = pp.name; inp.maxLength = 32;
+        nm.replaceWith(inp); inp.focus(); inp.select();
+        function done(save) { if (!editing) return; editing = null; var v = inp.value.trim(); if (save && v && v !== pp.name) sendJson('faceRename', { pid: pp.id, name: v }); lastPeopleSig = ''; }
+        inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); });
+        inp.addEventListener('blur', function () { done(true); });
+      });
+      var del = row.querySelector('[data-a=del]'), arm = 0;
+      del.addEventListener('click', function () {
+        if (Date.now() - arm < 3000) { sendJson('faceDelete', { pid: pp.id }); return; }
+        arm = Date.now(); del.textContent = 'Sigurno?'; setTimeout(function () { del.textContent = 'Obriši'; }, 3000);
+      });
+      list.appendChild(row);
+    });
+  }
+  function startEnroll() {
+    var n = $('enrollName').value.trim();
+    if (!n) { toast('Upiši ime osobe.', true); $('enrollName').focus(); return; }
+    sendJson('faceEnroll', { name: n });
+  }
+  $('enrollBtn').addEventListener('click', startEnroll);
+  $('enrollName').addEventListener('keydown', function (e) { if (e.key === 'Enter') startEnroll(); });
+  $('enrollCancelBtn').addEventListener('click', function () { cmd('tomatoFaceCancel'); });
+  var fArm = 0;
+  $('forgetAllBtn').addEventListener('click', function () {
+    var b = this;
+    if (Date.now() - fArm < 3000) { cmd('tomatoFaceForget'); fArm = 0; setText(b, 'Obriši sve osobe'); return; }
+    fArm = Date.now(); setText(b, 'Klikni ponovo za brisanje svih'); setTimeout(function () { setText(b, 'Obriši sve osobe'); fArm = 0; }, 3000);
+  });
+
+  // ------------------------------------------------------------------ asistent
+  var ICON = { crit: '!', warn: '!', info: 'i', ok: '✓' };
+  function insightEl(i) {
+    var el = document.createElement('div'); el.className = 'insight ' + i.level;
+    el.innerHTML = '<div class="ic"></div><div style="min-width:0"><div class="tt"></div><div class="tx"></div></div><div></div>';
+    el.querySelector('.ic').textContent = ICON[i.level] || 'i';
+    el.querySelector('.tt').textContent = i.title; el.querySelector('.tx').textContent = i.text || '';
+    if (i.action) {
+      var b = document.createElement('button'); b.className = 'btn sm violet'; b.textContent = i.action.label;
+      b.addEventListener('click', function () {
+        if (i.action.cmd) cmd(i.action.cmd);
+        else if (i.action.set) sendJson('tomatoSet', i.action.set);
+        else if (i.action.tab) showView(i.action.tab);
+      });
+      el.lastChild.appendChild(b);
+    }
+    return el;
+  }
+  var lastAiSig = '';
+  function applyAssistant(list, on) {
+    $('aiOff').classList.toggle('hide', !!on); $('aiList').classList.toggle('hide', !on);
+    $('aiMini').classList.toggle('hide', !on);
+    list = on ? (list || []) : [];
+    var bad = list.filter(function (i) { return i.level === 'crit' || i.level === 'warn'; });
+    var badge = $('aiBadge'); badge.classList.toggle('hide', !bad.length); setText(badge, String(bad.length));
+    badge.classList.toggle('crit', list.some(function (i) { return i.level === 'crit'; }));
+    var sig = JSON.stringify(list) + on; if (sig === lastAiSig) return; lastAiSig = sig;
+    var full = $('aiList'), mini = $('aiMini'); full.innerHTML = ''; mini.innerHTML = '';
+    list.forEach(function (i) { full.appendChild(insightEl(i)); });
+    list.slice(0, 2).forEach(function (i) { mini.appendChild(insightEl(i)); });
+  }
+
+  // ------------------------------------------------------------------ komande (chat)
+  function chatAdd(who, text) {
+    var c = $('chat'), m = document.createElement('div'); m.className = 'msg ' + who; m.textContent = text; c.appendChild(m);
+    while (c.children.length > 60) c.removeChild(c.firstChild);
+    c.scrollTop = c.scrollHeight;
+  }
+  function runCommand(text, replyEl) {
+    if (!String(text).trim()) return;
+    chatAdd('me', text);
+    var r = parseCommand(text, status || {});
+    if (r.send) r.send.forEach(function (c) { send(c); });
+    if (r.json) r.json.forEach(function (j) { sendJson(j[0], j[1]); });
+    if (r.jog) { send(r.jog[0]); setTimeout(function () { send(r.jog[1]); }, r.jog[2]); }
+    chatAdd('bot', r.reply); if (replyEl) setText(replyEl, '🤖 ' + r.reply);
+    speak(r.reply.replace(/[•\n]/g, ' '));
+    if (r.tab && !replyEl) showView(r.tab);
+  }
+  window.robotCommand = runCommand;
+  $('cmdBtn').addEventListener('click', function () { runCommand($('cmdInput').value); $('cmdInput').value = ''; });
+  $('cmdInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') { runCommand(this.value); this.value = ''; } });
+  $('cmdMiniBtn').addEventListener('click', function () { runCommand($('cmdMini').value, $('cmdMiniReply')); $('cmdMini').value = ''; });
+  $('cmdMini').addEventListener('keydown', function (e) { if (e.key === 'Enter') { runCommand(this.value, $('cmdMiniReply')); this.value = ''; } });
+  ['uberi jedan', 'ko je ispred?', 'ubaci u kanticu', 'koliko si ubrao?', 'šta nije u redu?', 'mahni', 'pomoć'].forEach(function (s) {
+    var c = document.createElement('span'); c.className = 'chip'; c.textContent = s; c.addEventListener('click', function () { runCommand(s); }); $('cmdChips').appendChild(c);
+  });
+  chatAdd('bot', 'Zdravo! Ja sam asistent robota. Napiši komandu ili izaberi neku ispod.');
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR && window.isSecureContext) {
+    var mic = $('micBtn'); mic.classList.remove('hide');
+    mic.addEventListener('click', function () {
+      try { var r = new SR(); r.lang = 'sr-RS'; r.onresult = function (e) { runCommand(e.results[0][0].transcript); }; r.start(); toast('Slušam…'); } catch (e) { toast('Glasovni unos nije dostupan.', true); }
+    });
+  }
+
+  // ------------------------------------------------------------------ podesavanja
+  var settings = [], pending = {};
+  var CHOICE_TXT = { bucket: 'U kanticu', pose: 'Na pozu odlaganja' };
+  function renderSettings(list) {
+    settings = list; pending = {};
+    var root = $('setGroups'); root.innerHTML = '';
+    var groups = {}, order = [];
+    list.forEach(function (s) { if (!groups[s.group]) { groups[s.group] = []; order.push(s.group); } groups[s.group].push(s); });
+    order.forEach(function (g) {
+      var card = document.createElement('div'); card.className = 'card';
+      card.innerHTML = '<div class="card-h"><span class="card-t"></span></div><div class="card-b"></div>';
+      card.querySelector('.card-t').textContent = g;
+      groups[g].forEach(function (s) { card.querySelector('.card-b').appendChild(settingRow(s)); });
+      root.appendChild(card);
+    });
+    updateSaveBar();
+  }
+  function showVal(s, v) {
+    if (s.type === 'bool') return v ? 'da' : 'ne';
+    if (s.type === 'choice') return CHOICE_TXT[v] || v;
+    return (s.type === 'float' ? Number(v).toFixed(s.step < 0.1 ? 2 : 1) : String(v)) + (s.unit ? ' ' + s.unit : '');
+  }
+  function settingRow(s) {
+    var row = document.createElement('div'); row.className = 'set-row';
+    var nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = s.label;
+    var sm = document.createElement('small'); sm.textContent = 'podrazumevano: ' + showVal(s, s.default); nm.appendChild(sm); row.appendChild(nm);
+    if (s.type === 'bool') {
+      var lab = document.createElement('label'); lab.className = 'switch';
+      var inp = document.createElement('input'); inp.type = 'checkbox'; inp.checked = !!s.value;
+      lab.appendChild(inp); lab.appendChild(document.createElement('span'));
+      inp.addEventListener('change', function () { change(s, inp.checked, null); }); row.appendChild(lab);
+    } else if (s.type === 'choice') {
+      var seg = document.createElement('div'); seg.className = 'seg';
+      s.options.forEach(function (o) {
+        var b = document.createElement('button'); b.textContent = CHOICE_TXT[o] || o; b.className = o === s.value ? 'on' : '';
+        b.addEventListener('click', function () { qa('button', seg).forEach(function (x) { x.className = ''; }); b.className = 'on'; change(s, o, null); });
+        seg.appendChild(b);
+      });
+      row.appendChild(seg);
+    } else {
+      var val = document.createElement('div'); val.className = 'val'; val.textContent = showVal(s, s.value); row.appendChild(val);
+      var r = document.createElement('input'); r.type = 'range'; r.min = s.min; r.max = s.max; r.step = s.step; r.value = s.value;
+      r.addEventListener('input', function () { var v = s.type === 'int' ? parseInt(r.value, 10) : parseFloat(r.value); val.textContent = showVal(s, v); change(s, v, val); });
+      row.appendChild(r);
+    }
+    return row;
+  }
+  function change(s, v, valEl) { if (v === s.value) delete pending[s.id]; else pending[s.id] = v; if (valEl) valEl.classList.toggle('changed', v !== s.value); updateSaveBar(); }
+  function updateSaveBar() {
+    var n = Object.keys(pending).length;
+    $('setSaveBtn').disabled = n === 0; $('setUndoBtn').disabled = n === 0;
+    setText($('saveMsg'), n ? 'Nesačuvanih promena: ' + n : 'Promene važe odmah posle čuvanja.');
+  }
+  $('setSaveBtn').addEventListener('click', function () { if (Object.keys(pending).length) sendJson('tomatoSet', pending); });
+  $('setUndoBtn').addEventListener('click', function () { renderSettings(settings); });
+  var resetArm = 0;
+  $('setResetBtn').addEventListener('click', function () {
+    var b = this;
+    if (Date.now() - resetArm < 3000) { cmd('tomatoSettingsReset'); setTimeout(function () { send('tomatoGetSettings'); }, 300); resetArm = 0; setText(b, 'Podrazumevano'); return; }
+    resetArm = Date.now(); setText(b, 'Klikni ponovo'); setTimeout(function () { setText(b, 'Podrazumevano'); resetArm = 0; }, 3000);
+  });
+
+  // ------------------------------------------------------------------ dnevnik
+  var logFilter = 'all', logData = [];
+  function addRow(t, level, text) {
+    logData.push([t, level, text]); if (logData.length > 1000) logData.shift();
+    var list = $('logList'), empty = list.querySelector('.empty'); if (empty) empty.remove();
+    var row = document.createElement('div'); row.className = 'log-row ' + (level || 'info');
+    row.innerHTML = '<span class="tm"></span><span class="ic"></span><span class="tx"></span>';
+    row.querySelector('.tm').textContent = clock(t); row.querySelector('.tx').textContent = text;
+    if (logFilter !== 'all' && level !== logFilter) row.classList.add('hide');
+    list.insertBefore(row, list.firstChild);
+    while (list.children.length > 400) list.removeChild(list.lastChild);
+  }
+  var firstEvents = true;
+  function addEvents(evs) {
+    evs.forEach(function (e) {
+      if (e.id <= lastEventId) return;
+      lastEventId = e.id;
+      var lvl = e.level;
+      if (lvl === 'info' && /ubačen|odložen|naučen|uhvaćen|kalibrisan|zapamćen/i.test(e.text)) lvl = 'ok';
+      addRow(e.t * 1000, lvl, e.text);
+      if (!firstEvents && (lvl === 'ok' || lvl === 'warn')) toast(e.text, lvl === 'warn', 3800);
+    });
+    firstEvents = false;
+  }
+  function localEvent(text, level) { addRow(Date.now(), level === 'warn' ? 'warn' : 'local', text); }
+  qa('#logFilter button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      logFilter = b.getAttribute('data-f');
+      qa('#logFilter button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      qa('#logList .log-row').forEach(function (r) { r.classList.toggle('hide', logFilter !== 'all' && !r.classList.contains(logFilter)); });
+    });
+  });
+  $('logClearBtn').addEventListener('click', function () { $('logList').innerHTML = '<div class="empty">Prikaz očišćen.</div>'; logData = []; });
+  $('logExportBtn').addEventListener('click', function () {
+    var txt = logData.map(function (r) { return new Date(r[0]).toLocaleString() + '\t' + r[1] + '\t' + r[2]; }).join('\n');
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain;charset=utf-8' }));
+    a.download = 'dnevnik_robota_' + new Date().toISOString().slice(0, 10) + '.txt'; document.body.appendChild(a); a.click(); a.remove();
+  });
+
+  // ------------------------------------------------------------------ start
+  setConn(false, 'Povezivanje…');
+  var saved = null; try { saved = localStorage.getItem('tomatoView'); } catch (e) {}
+  if (saved && $('view-' + saved)) showView(saved);
+  startVideo(); connect();
+  window.addEventListener('resize', function () { lastSample = 0; });
+})();
+</script>
+</body>
+</html>

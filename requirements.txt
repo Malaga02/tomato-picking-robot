@@ -1,0 +1,17 @@
+# System packages on Raspberry Pi OS (apt): python3-opencv python3-numpy python3-picamera2 i2c-tools python3-smbus
+adafruit-circuitpython-motor
+adafruit-circuitpython-pca9685
+adafruit-circuitpython-busdevice
+adafruit-circuitpython-ssd1306
+adafruit-circuitpython-ads7830
+luma.oled
+imutils
+pillow
+flask
+flask_cors
+pyzmq
+pybase64
+psutil
+spidev
+mpu6050-raspberrypi
+websockets==13.1
